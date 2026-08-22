@@ -1,0 +1,114 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum NodeType {
+  SPACE
+  ITEM
+}
+
+enum ItemStatus {
+  ACTIVE
+  IDLE
+  LENT
+  LOST
+  SOLD
+  DISPOSED
+}
+
+enum AttachmentCategory {
+  PHOTO
+  MANUAL
+  SERIAL
+  RECEIPT
+  WARRANTY
+  OTHER
+}
+
+model User {
+  id           String        @id @default(uuid()) @db.Uuid
+  email        String        @unique
+  passwordHash String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  sessions     AuthSession[]
+}
+
+model AuthSession {
+  id        String   @id @default(uuid()) @db.Uuid
+  tokenHash String   @unique
+  userId    String   @db.Uuid
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Node {
+  id            String       @id @default(uuid()) @db.Uuid
+  nodeType      NodeType
+  parentId      String?      @db.Uuid
+  name          String       @db.VarChar(200)
+  description   String?      @db.Text
+  isContainer   Boolean      @default(false)
+  status        ItemStatus   @default(ACTIVE)
+  acquiredDate  DateTime?    @db.Date
+  endDate       DateTime?    @db.Date
+  valueAmount   Decimal?     @db.Decimal(19, 4)
+  currency      String?      @db.VarChar(3)
+  quantity      Int          @default(1)
+  brand         String?      @db.VarChar(200)
+  model         String?      @db.VarChar(200)
+  serialNumber  String?      @db.VarChar(300)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  archivedAt    DateTime?
+  parent        Node?        @relation("NodeTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children      Node[]       @relation("NodeTree")
+  attachments   Attachment[]
+  movements     Movement[]   @relation("MovementItem")
+  movedFromHere Movement[]   @relation("MovementFrom")
+  movedToHere   Movement[]   @relation("MovementTo")
+
+  @@index([parentId])
+  @@index([nodeType, archivedAt])
+  @@index([name])
+}
+
+model Movement {
+  id           String   @id @default(uuid()) @db.Uuid
+  itemId       String   @db.Uuid
+  fromParentId String   @db.Uuid
+  toParentId   String   @db.Uuid
+  movedAt      DateTime @default(now())
+  note         String?  @db.VarChar(500)
+  item         Node     @relation("MovementItem", fields: [itemId], references: [id], onDelete: Cascade)
+  fromParent   Node     @relation("MovementFrom", fields: [fromParentId], references: [id], onDelete: Restrict)
+  toParent     Node     @relation("MovementTo", fields: [toParentId], references: [id], onDelete: Restrict)
+
+  @@index([itemId, movedAt(sort: Desc)])
+}
+
+model Attachment {
+  id               String             @id @default(uuid()) @db.Uuid
+  itemId           String             @db.Uuid
+  category         AttachmentCategory @default(OTHER)
+  originalFilename String             @db.VarChar(500)
+  mimeType         String             @db.VarChar(200)
+  size             Int
+  storageKey       String             @unique @db.VarChar(200)
+  checksum         String             @db.VarChar(64)
+  description      String?            @db.VarChar(1000)
+  sortOrder        Int                @default(0)
+  createdAt        DateTime           @default(now())
+  item             Node               @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([itemId, sortOrder, createdAt])
+}

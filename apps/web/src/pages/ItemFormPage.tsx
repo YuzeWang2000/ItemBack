@@ -1,6 +1,6 @@
-import type { ItemStatus, NodeRecord } from '@itemback/contracts';
+import type { ItemStatus, NodeRecord, TagRecord } from '@itemback/contracts';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowLeft, Box, PackageOpen } from 'lucide-react';
+import { ArrowLeft, Box, Camera, ImagePlus, PackageOpen, Plus, Tags, X } from 'lucide-react';
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, ApiError } from '../api';
@@ -22,12 +22,14 @@ interface FormState {
   status: ItemStatus;
   acquiredDate: string;
   endDate: string;
+  expiryDate: string;
   valueAmount: string;
   currency: string;
   quantity: string;
   brand: string;
   model: string;
   serialNumber: string;
+  tags: string[];
 }
 const emptyForm: FormState = {
   name: '',
@@ -37,12 +39,14 @@ const emptyForm: FormState = {
   status: 'ACTIVE',
   acquiredDate: '',
   endDate: '',
+  expiryDate: '',
   valueAmount: '',
   currency: 'CNY',
   quantity: '1',
   brand: '',
   model: '',
   serialNumber: '',
+  tags: [],
 };
 
 export function ItemFormPage() {
@@ -54,7 +58,10 @@ export function ItemFormPage() {
     parentId: search.get('parent') ?? '',
   });
   const [error, setError] = useState('');
+  const [photos, setPhotos] = useState<File[]>([]);
+  const [saving, setSaving] = useState(false);
   const tree = useQuery({ queryKey: ['tree'], queryFn: () => api<NodeRecord[]>('/nodes/tree') });
+  const tags = useQuery({ queryKey: ['tags'], queryFn: () => api<TagRecord[]>('/tags') });
   const current = useQuery({
     queryKey: ['node', id],
     queryFn: () => api<NodeRecord>(`/nodes/${id}`),
@@ -74,12 +81,14 @@ export function ItemFormPage() {
         status: current.data.status,
         acquiredDate: current.data.acquiredDate ?? '',
         endDate: current.data.endDate ?? '',
+        expiryDate: current.data.expiryDate ?? '',
         valueAmount: current.data.valueAmount ?? '',
         currency: current.data.currency ?? 'CNY',
         quantity: String(current.data.quantity),
         brand: current.data.brand ?? '',
         model: current.data.model ?? '',
         serialNumber: current.data.serialNumber ?? '',
+        tags: current.data.tags.map((tag) => tag.name),
       });
   }, [current.data]);
   useEffect(() => {
@@ -95,8 +104,8 @@ export function ItemFormPage() {
         body: JSON.stringify(payload),
       }),
   });
-  if (tree.isLoading || current.isLoading) return <Loading />;
-  if (tree.error || current.error) return <Notice>表单所需数据加载失败。</Notice>;
+  if (tree.isLoading || current.isLoading || tags.isLoading) return <Loading />;
+  if (tree.error || current.error || tags.error) return <Notice>表单所需数据加载失败。</Notice>;
   if (!editing && candidates.length === 0)
     return (
       <div className="page narrow-page">
@@ -120,6 +129,7 @@ export function ItemFormPage() {
       setError('记录价值时必须选择币种');
       return;
     }
+    setSaving(true);
     const payload: Record<string, unknown> = {
       name: form.name,
       description: form.description || (editing ? null : undefined),
@@ -127,24 +137,45 @@ export function ItemFormPage() {
       status: form.status,
       acquiredDate: form.acquiredDate || (editing ? null : undefined),
       endDate: form.endDate || (editing ? null : undefined),
+      expiryDate: form.expiryDate || (editing ? null : undefined),
       valueAmount: form.valueAmount || (editing ? null : undefined),
       currency: form.valueAmount ? form.currency.toUpperCase() : editing ? null : undefined,
       quantity: Number(form.quantity),
       brand: form.brand || (editing ? null : undefined),
       model: form.model || (editing ? null : undefined),
       serialNumber: form.serialNumber || (editing ? null : undefined),
+      tags: form.tags,
       ...(!editing ? { parentId: form.parentId } : {}),
     };
     try {
       const item = await mutation.mutateAsync(payload);
+      let uploadFailed = false;
+      if (photos.length) {
+        const body = new FormData();
+        photos.forEach((photo) => body.append('files', photo));
+        body.append('category', 'PHOTO');
+        try {
+          await api(`/items/${item.id}/attachments`, { method: 'POST', body });
+        } catch {
+          uploadFailed = true;
+        }
+      }
       await Promise.all([
         client.invalidateQueries({ queryKey: ['tree'] }),
         client.invalidateQueries({ queryKey: ['dashboard'] }),
         client.invalidateQueries({ queryKey: ['node', id] }),
+        client.invalidateQueries({ queryKey: ['items'] }),
+        client.invalidateQueries({ queryKey: ['tags'] }),
       ]);
-      navigate(`/items/${item.id}`);
+      navigate(`/items/${item.id}`, {
+        state: uploadFailed
+          ? { notice: '物品已保存，但图片上传失败，请在详情页重试。' }
+          : undefined,
+      });
     } catch (reason) {
       setError(reason instanceof ApiError ? reason.message : '保存失败，请稍后重试');
+    } finally {
+      setSaving(false);
     }
   };
   return (
@@ -236,6 +267,14 @@ export function ItemFormPage() {
                 placeholder="用途、颜色、购买背景或其他想留下的信息"
               />
             </Field>
+            <div className="field span-two">
+              <span>标签（可多选）</span>
+              <TagPicker
+                available={tags.data ?? []}
+                value={form.tags}
+                onChange={(value) => set('tags', value)}
+              />
+            </div>
           </div>
         </section>
         <section className="form-section">
@@ -283,6 +322,14 @@ export function ItemFormPage() {
                 onChange={(e) => set('endDate', e.target.value)}
               />
             </Field>
+            <Field label="有效期至（可选）" hint="适用于食品、药品、耗材等有保质期的物品">
+              <input
+                type="date"
+                min={form.acquiredDate || undefined}
+                value={form.expiryDate}
+                onChange={(e) => set('expiryDate', e.target.value)}
+              />
+            </Field>
             <Field label="数量">
               <input
                 type="number"
@@ -316,16 +363,146 @@ export function ItemFormPage() {
             </Field>
           </div>
         </section>
+        <section className="form-section">
+          <div className="section-title">
+            <span>04</span>
+            <div>
+              <h2>物品图片</h2>
+              <p>可直接调用手机后置摄像头，也可以从本机选择多张图片。</p>
+            </div>
+          </div>
+          <div className="quick-photo-actions">
+            <label className="button primary">
+              <Camera size={17} />
+              随手拍
+              <input
+                hidden
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={(event) =>
+                  setPhotos((current) =>
+                    [...current, ...Array.from(event.target.files ?? [])].slice(0, 20),
+                  )
+                }
+              />
+            </label>
+            <label className="button secondary">
+              <ImagePlus size={17} />
+              选择图片
+              <input
+                hidden
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={(event) =>
+                  setPhotos((current) =>
+                    [...current, ...Array.from(event.target.files ?? [])].slice(0, 20),
+                  )
+                }
+              />
+            </label>
+            <small>最多 20 张；图片会在物品保存后立即上传。</small>
+          </div>
+          {photos.length > 0 && (
+            <div className="photo-queue">
+              {photos.map((photo, index) => (
+                <span key={`${photo.name}-${index}`}>
+                  {photo.name}
+                  <button
+                    type="button"
+                    onClick={() => setPhotos(photos.filter((_, i) => i !== index))}
+                    aria-label={`移除 ${photo.name}`}
+                  >
+                    <X size={13} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+        </section>
         <div className="form-actions">
           <Link className="button ghost" to={editing ? `/items/${id}` : '/browse'}>
             <ArrowLeft size={17} />
             取消
           </Link>
-          <button className="button primary" disabled={mutation.isPending}>
-            {mutation.isPending ? '正在保存…' : editing ? '保存修改' : '加入档案'}
+          <button className="button primary" disabled={saving}>
+            {saving ? '正在保存…' : editing ? '保存修改' : '加入档案'}
           </button>
         </div>
       </form>
+    </div>
+  );
+}
+
+function TagPicker({
+  available,
+  value,
+  onChange,
+}: {
+  available: TagRecord[];
+  value: string[];
+  onChange(value: string[]): void;
+}) {
+  const [input, setInput] = useState('');
+  const choices = [
+    ...new Map(
+      [...available.map((tag) => tag.name), ...value].map((name) => [
+        name.toLocaleLowerCase(),
+        name,
+      ]),
+    ).values(),
+  ];
+  const selected = (name: string) =>
+    value.some((current) => current.toLocaleLowerCase() === name.toLocaleLowerCase());
+  const toggle = (name: string) => {
+    if (selected(name)) {
+      onChange(value.filter((current) => current.toLocaleLowerCase() !== name.toLocaleLowerCase()));
+    } else if (value.length < 20) {
+      onChange([...value, name]);
+    }
+  };
+  const add = () => {
+    const name = input.trim().replace(/\s+/g, ' ').slice(0, 50);
+    if (name && !selected(name) && value.length < 20) onChange([...value, name]);
+    setInput('');
+  };
+  return (
+    <div className="tag-picker">
+      {choices.length > 0 && (
+        <div className="tag-choices">
+          {choices.map((name) => (
+            <button
+              key={name.toLocaleLowerCase()}
+              type="button"
+              className={selected(name) ? 'selected' : ''}
+              aria-pressed={selected(name)}
+              onClick={() => toggle(name)}
+            >
+              <Tags size={13} />#{name}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="tag-entry">
+        <input
+          aria-label="新标签名称"
+          maxLength={50}
+          value={input}
+          onChange={(event) => setInput(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ',') {
+              event.preventDefault();
+              add();
+            }
+          }}
+          placeholder="输入新标签，按回车添加"
+        />
+        <button className="button secondary" type="button" onClick={add} disabled={!input.trim()}>
+          <Plus size={15} />
+          添加
+        </button>
+      </div>
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ItemStatus } from '@prisma/client';
 import { Transform } from 'class-transformer';
 import {
+  ArrayMaxSize,
   IsBoolean,
   IsDateString,
   IsDecimal,
@@ -55,6 +56,11 @@ export class CreateItemDto {
   @IsDateString({ strict: true })
   endDate?: string;
 
+  @ApiPropertyOptional({ example: '2026-12-31', description: '保质期或有效期截止日' })
+  @IsOptional()
+  @IsDateString({ strict: true })
+  expiryDate?: string;
+
   @ApiPropertyOptional({ example: '600.00', type: String })
   @IsOptional()
   @IsDecimal({ decimal_digits: '0,4', force_decimal: false })
@@ -91,4 +97,11 @@ export class CreateItemDto {
   @IsString()
   @MaxLength(300)
   serialNumber?: string;
+
+  @ApiPropertyOptional({ type: [String], example: ['食品', '常备'] })
+  @IsOptional()
+  @ArrayMaxSize(20)
+  @IsString({ each: true })
+  @MaxLength(50, { each: true })
+  tags?: string[];
 }

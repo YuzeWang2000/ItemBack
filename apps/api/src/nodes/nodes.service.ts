@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Node, NodeType, Prisma } from '@prisma/client';
+import { ItemStatus, Node, NodeType, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CostService } from './cost.service';
 import { CreateItemDto } from './dto/create-item.dto';
@@ -13,10 +13,10 @@ import { MoveItemDto } from './dto/move-item.dto';
 import { UpdateNodeDto } from './dto/update-node.dto';
 
 const clean = (value: string | undefined) => value?.trim() || undefined;
-const dateValue = (value: string | undefined) =>
+const dateValue = (value: string | null | undefined) =>
   value ? new Date(`${value.slice(0, 10)}T00:00:00.000Z`) : undefined;
 
-const coverInclude = Prisma.validator<Prisma.NodeInclude>()({
+const itemInclude = Prisma.validator<Prisma.NodeInclude>()({
   attachments: {
     where: {
       mimeType: { in: ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif'] },
@@ -24,6 +24,10 @@ const coverInclude = Prisma.validator<Prisma.NodeInclude>()({
     orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
     take: 1,
     select: { id: true },
+  },
+  tags: {
+    select: { tag: { select: { id: true, name: true } } },
+    orderBy: { tag: { name: 'asc' } },
   },
 });
 @Injectable()
@@ -55,13 +59,70 @@ export class NodesService {
 
   async createItem(dto: CreateItemDto) {
     await this.assertValidParent(dto.parentId);
-    this.validateDates(dto.acquiredDate, dto.endDate);
-    const node = await this.prisma.node.create({ data: this.itemData(dto) });
+    this.validateDates(dto.acquiredDate, dto.endDate, dto.expiryDate);
+    const node = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.node.create({ data: this.itemData(dto) });
+      await this.setTags(tx, created.id, dto.tags ?? []);
+      return tx.node.findUniqueOrThrow({ where: { id: created.id }, include: itemInclude });
+    });
     return this.present(node, await this.path(node.id));
   }
 
+  async listItems(rawStatus?: string, rawTags?: string) {
+    const status = rawStatus?.trim();
+    if (status && !Object.values(ItemStatus).includes(status as ItemStatus)) {
+      throw new BadRequestException({ code: 'INVALID_ITEM_STATUS', message: '物品状态无效' });
+    }
+    const rawTagIds =
+      rawTags
+        ?.split(',')
+        .map((id) => id.trim())
+        .filter(Boolean) ?? [];
+    const tagIds = [...new Set(rawTagIds)];
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (tagIds.some((id) => !uuid.test(id))) {
+      throw new BadRequestException({ code: 'INVALID_TAG_ID', message: '标签筛选条件无效' });
+    }
+    const where: Prisma.NodeWhereInput = {
+      nodeType: NodeType.ITEM,
+      archivedAt: null,
+      ...(status ? { status: status as ItemStatus } : {}),
+      ...(tagIds.length ? { AND: tagIds.map((tagId) => ({ tags: { some: { tagId } } })) } : {}),
+    };
+    const nodes = await this.prisma.node.findMany({
+      where,
+      include: itemInclude,
+      orderBy: [{ updatedAt: 'desc' }, { name: 'asc' }],
+    });
+    return {
+      items: await Promise.all(
+        nodes.map(async (node) => this.present(node, await this.path(node.id))),
+      ),
+      total: nodes.length,
+    };
+  }
+
+  async listTags() {
+    const tags = await this.prisma.tag.findMany({
+      where: {
+        nodes: { some: { node: { nodeType: NodeType.ITEM, archivedAt: null } } },
+      },
+      select: {
+        id: true,
+        name: true,
+        _count: {
+          select: {
+            nodes: { where: { node: { nodeType: NodeType.ITEM, archivedAt: null } } },
+          },
+        },
+      },
+      orderBy: { name: 'asc' },
+    });
+    return tags.map(({ _count, ...tag }) => ({ ...tag, itemCount: _count.nodes }));
+  }
+
   async get(id: string) {
-    const node = await this.prisma.node.findUnique({ where: { id }, include: coverInclude });
+    const node = await this.prisma.node.findUnique({ where: { id }, include: itemInclude });
     if (!node) throw new NotFoundException({ code: 'NODE_NOT_FOUND', message: '空间或物品不存在' });
     return this.present(node, await this.path(id));
   }
@@ -70,7 +131,7 @@ export class NodesService {
     await this.requireNode(id);
     const nodes = await this.prisma.node.findMany({
       where: { parentId: id, archivedAt: null },
-      include: coverInclude,
+      include: itemInclude,
       orderBy: [{ nodeType: 'asc' }, { name: 'asc' }],
     });
     return nodes.map((node) => this.present(node));
@@ -137,7 +198,7 @@ export class NodesService {
           message: '仍包含物品，不能改为普通物品',
         });
     }
-    this.validateDates(dto.acquiredDate, dto.endDate, current);
+    this.validateDates(dto.acquiredDate, dto.endDate, dto.expiryDate, current);
     if (
       dto.valueAmount !== undefined &&
       dto.valueAmount !== null &&
@@ -158,6 +219,7 @@ export class NodesService {
         ? { acquiredDate: dateValue(dto.acquiredDate) ?? null }
         : {}),
       ...(dto.endDate !== undefined ? { endDate: dateValue(dto.endDate) ?? null } : {}),
+      ...(dto.expiryDate !== undefined ? { expiryDate: dateValue(dto.expiryDate) ?? null } : {}),
       ...(dto.valueAmount !== undefined
         ? { valueAmount: dto.valueAmount ? new Prisma.Decimal(dto.valueAmount) : null }
         : {}),
@@ -169,7 +231,11 @@ export class NodesService {
       ...(dto.model !== undefined ? { model: clean(dto.model) ?? null } : {}),
       ...(dto.serialNumber !== undefined ? { serialNumber: clean(dto.serialNumber) ?? null } : {}),
     };
-    const node = await this.prisma.node.update({ where: { id }, data });
+    const node = await this.prisma.$transaction(async (tx) => {
+      await tx.node.update({ where: { id }, data });
+      if (dto.tags !== undefined) await this.setTags(tx, id, dto.tags);
+      return tx.node.findUniqueOrThrow({ where: { id }, include: itemInclude });
+    });
     return this.present(node, await this.path(id));
   }
 
@@ -180,9 +246,15 @@ export class NodesService {
       select: { id: true },
     });
     if (child)
-      throw new ConflictException({ code: 'NODE_NOT_EMPTY', message: '仍包含物品，不能归档' });
+      throw new ConflictException({
+        code: 'NODE_NOT_EMPTY',
+        message:
+          node.nodeType === NodeType.SPACE
+            ? '空间仍有物品，清空后才能删除'
+            : '仍包含物品，不能归档',
+      });
     await this.prisma.node.update({ where: { id }, data: { archivedAt: new Date() } });
-    return { id: node.id, archived: true };
+    return { id: node.id, archived: true, deleted: node.nodeType === NodeType.SPACE };
   }
 
   async move(id: string, dto: MoveItemDto) {
@@ -244,16 +316,21 @@ export class NodesService {
     const where: Prisma.NodeWhereInput = {
       nodeType: NodeType.ITEM,
       archivedAt: null,
-      OR: ['name', 'brand', 'model', 'serialNumber', 'description'].map((field) => ({
-        [field]: { contains: query, mode: 'insensitive' },
-      })),
+      OR: [
+        ...['name', 'brand', 'model', 'serialNumber', 'description'].map(
+          (field): Prisma.NodeWhereInput => ({
+            [field]: { contains: query, mode: 'insensitive' },
+          }),
+        ),
+        { tags: { some: { tag: { name: { contains: query, mode: 'insensitive' } } } } },
+      ],
     };
     const safePage = Math.max(1, page);
     const safeSize = Math.min(100, Math.max(1, pageSize));
     const [nodes, total] = await this.prisma.$transaction([
       this.prisma.node.findMany({
         where,
-        include: coverInclude,
+        include: itemInclude,
         orderBy: { updatedAt: 'desc' },
         skip: (safePage - 1) * safeSize,
         take: safeSize,
@@ -295,6 +372,7 @@ export class NodesService {
       status: dto.status,
       acquiredDate: dateValue(dto.acquiredDate),
       endDate: dateValue(dto.endDate),
+      expiryDate: dateValue(dto.expiryDate),
       valueAmount: dto.valueAmount ? new Prisma.Decimal(dto.valueAmount) : undefined,
       currency: clean(dto.currency)?.toUpperCase(),
       quantity: dto.quantity ?? 1,
@@ -304,22 +382,75 @@ export class NodesService {
     };
   }
 
-  private validateDates(acquired?: string, end?: string, existing?: Node) {
-    const start = dateValue(acquired) ?? existing?.acquiredDate ?? null;
-    const finish = dateValue(end) ?? existing?.endDate ?? null;
+  private validateDates(
+    acquired?: string | null,
+    end?: string | null,
+    expiry?: string | null,
+    existing?: Node,
+  ) {
+    const start =
+      acquired === undefined ? (existing?.acquiredDate ?? null) : (dateValue(acquired) ?? null);
+    const finish = end === undefined ? (existing?.endDate ?? null) : (dateValue(end) ?? null);
+    const expires =
+      expiry === undefined ? (existing?.expiryDate ?? null) : (dateValue(expiry) ?? null);
     if (start && finish && finish < start) {
       throw new BadRequestException({
         code: 'INVALID_DATE_RANGE',
         message: '结束日期不能早于入手日期',
       });
     }
+    if (start && expires && expires < start) {
+      throw new BadRequestException({
+        code: 'INVALID_EXPIRY_DATE',
+        message: '有效期不能早于入手日期',
+      });
+    }
+  }
+
+  private async setTags(tx: Prisma.TransactionClient, nodeId: string, rawTags: string[]) {
+    const uniqueTags = [
+      ...new Map(
+        rawTags
+          .map((name) => name.trim().replace(/\s+/g, ' '))
+          .filter(Boolean)
+          .map((name) => [name.toLocaleLowerCase(), name] as const),
+      ).entries(),
+    ].map(([normalizedName, name]) => ({ normalizedName, name }));
+    const previous = await tx.nodeTag.findMany({
+      where: { nodeId },
+      select: { tagId: true },
+    });
+    const tags = await Promise.all(
+      uniqueTags.map((tag) =>
+        tx.tag.upsert({
+          where: { normalizedName: tag.normalizedName },
+          update: {},
+          create: tag,
+          select: { id: true },
+        }),
+      ),
+    );
+    await tx.nodeTag.deleteMany({ where: { nodeId } });
+    if (tags.length) {
+      await tx.nodeTag.createMany({
+        data: tags.map((tag) => ({ nodeId, tagId: tag.id })),
+        skipDuplicates: true,
+      });
+    }
+    const previousIds = previous.map(({ tagId }) => tagId);
+    if (previousIds.length) {
+      await tx.tag.deleteMany({ where: { id: { in: previousIds }, nodes: { none: {} } } });
+    }
   }
 
   present(
-    node: Node & { attachments?: Array<{ id: string }> },
+    node: Node & {
+      attachments?: Array<{ id: string }>;
+      tags?: Array<{ tag: { id: string; name: string } }>;
+    },
     path?: Array<{ id: string; name: string; nodeType: NodeType }>,
   ) {
-    const { attachments, ...record } = node;
+    const { attachments, tags, ...record } = node;
     const metrics =
       node.nodeType === NodeType.ITEM
         ? this.costs.calculate(node.valueAmount, node.acquiredDate, node.endDate)
@@ -329,7 +460,9 @@ export class NodesService {
       valueAmount: node.valueAmount?.toString() ?? null,
       acquiredDate: node.acquiredDate?.toISOString().slice(0, 10) ?? null,
       endDate: node.endDate?.toISOString().slice(0, 10) ?? null,
+      expiryDate: node.expiryDate?.toISOString().slice(0, 10) ?? null,
       coverAttachmentId: attachments?.[0]?.id ?? null,
+      tags: tags?.map(({ tag }) => tag) ?? [],
       ...metrics,
       ...(path ? { path } : {}),
     };

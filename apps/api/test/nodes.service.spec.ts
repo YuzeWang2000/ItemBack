@@ -19,6 +19,7 @@ const makeNode = (data: Partial<Node>): Node => ({
   status: ItemStatus.ACTIVE,
   acquiredDate: null,
   endDate: null,
+  expiryDate: null,
   valueAmount: null,
   currency: null,
   quantity: 1,

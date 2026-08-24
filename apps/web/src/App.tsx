@@ -6,6 +6,7 @@ import { BrowsePage } from './pages/BrowsePage';
 import { DashboardPage } from './pages/DashboardPage';
 import { ItemDetailPage } from './pages/ItemDetailPage';
 import { ItemFormPage } from './pages/ItemFormPage';
+import { AllItemsPage } from './pages/AllItemsPage';
 import { LoginPage } from './pages/LoginPage';
 import { SearchPage } from './pages/SearchPage';
 import { SpaceFormPage } from './pages/SpaceFormPage';
@@ -32,6 +33,7 @@ export function App() {
         <Route path="browse/:id?" element={<BrowsePage />} />
         <Route path="spaces/new" element={<SpaceFormPage />} />
         <Route path="items/new" element={<ItemFormPage />} />
+        <Route path="items" element={<AllItemsPage />} />
         <Route path="items/:id/edit" element={<ItemFormPage />} />
         <Route path="items/:id" element={<ItemDetailPage />} />
         <Route path="search" element={<SearchPage />} />

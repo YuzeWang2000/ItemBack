@@ -1,5 +1,5 @@
 import type { ItemStatus, NodeRecord } from '@itemback/contracts';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Box,
   ChevronDown,
@@ -8,10 +8,11 @@ import {
   PackageOpen,
   Plus,
   Warehouse,
+  Trash2,
 } from 'lucide-react';
 import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { api } from '../api';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { api, ApiError } from '../api';
 import { ItemCard } from '../components/ItemCard';
 import { Empty, Loading, Notice, PageHeader } from '../components/ui';
 
@@ -30,6 +31,9 @@ const matchesFilter = (status: ItemStatus, filter: ItemFilter) =>
 export function BrowsePage() {
   const { id } = useParams();
   const [filter, setFilter] = useState<ItemFilter>('ALL');
+  const [notice, setNotice] = useState('');
+  const client = useQueryClient();
+  const navigate = useNavigate();
   const tree = useQuery({ queryKey: ['tree'], queryFn: () => api<NodeRecord[]>('/nodes/tree') });
   const current = useQuery({
     queryKey: ['node', id],
@@ -41,12 +45,30 @@ export function BrowsePage() {
     queryFn: () => api<NodeRecord[]>(`/nodes/${id}/children`),
     enabled: Boolean(id),
   });
+  const removeSpace = useMutation({
+    mutationFn: (spaceId: string) => api(`/nodes/${spaceId}`, { method: 'DELETE' }),
+  });
   if (tree.isLoading) return <Loading />;
   if (tree.error || !tree.data) return <Notice>空间树加载失败。</Notice>;
   const selected = current.data;
   const visibleChildren = (children.data ?? []).filter((item) =>
     matchesFilter(item.status, filter),
   );
+  const deleteSelectedSpace = async () => {
+    if (!selected || selected.nodeType !== 'SPACE') return;
+    if (!window.confirm(`删除空空间“${selected.name}”吗？`)) return;
+    setNotice('');
+    try {
+      await removeSpace.mutateAsync(selected.id);
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ['tree'] }),
+        client.invalidateQueries({ queryKey: ['dashboard'] }),
+      ]);
+      navigate('/browse');
+    } catch (reason) {
+      setNotice(reason instanceof ApiError ? reason.message : '空间删除失败');
+    }
+  };
   return (
     <div className="page browse-page">
       <PageHeader
@@ -70,6 +92,7 @@ export function BrowsePage() {
           </div>
         }
       />
+      {notice && <Notice>{notice}</Notice>}
       <div className="browser-layout">
         <aside className="tree-panel">
           <div className="tree-title">
@@ -119,11 +142,31 @@ export function BrowsePage() {
                   <h2>{selected?.name}</h2>
                   <p>{selected?.description || '没有补充说明'}</p>
                 </div>
-                {selected?.nodeType === 'ITEM' && (
-                  <Link className="text-link" to={`/items/${selected.id}`}>
-                    查看完整档案 <ChevronRight size={15} />
-                  </Link>
-                )}
+                <div className="location-summary-actions">
+                  {selected?.nodeType === 'ITEM' && (
+                    <Link className="text-link" to={`/items/${selected.id}`}>
+                      查看完整档案 <ChevronRight size={15} />
+                    </Link>
+                  )}
+                  {selected?.nodeType === 'SPACE' && (
+                    <button
+                      className="button danger subtle"
+                      type="button"
+                      onClick={deleteSelectedSpace}
+                      disabled={
+                        removeSpace.isPending ||
+                        children.isLoading ||
+                        Boolean(children.data?.length)
+                      }
+                      title={
+                        children.data?.length ? '请先移走或归档空间中的全部物品' : '删除这个空空间'
+                      }
+                    >
+                      <Trash2 size={15} />
+                      删除空间
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="contents-heading">
                 <h3>直接包含</h3>

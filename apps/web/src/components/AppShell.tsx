@@ -1,10 +1,11 @@
-import { Archive, Boxes, LayoutDashboard, LogOut, Menu, Search, X } from 'lucide-react';
+import { Archive, Boxes, LayoutDashboard, LayoutGrid, LogOut, Menu, Search, X } from 'lucide-react';
 import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth';
 
 const links = [
   { to: '/', label: '仪表盘', icon: LayoutDashboard, end: true },
+  { to: '/items', label: '所有物品', icon: LayoutGrid, end: true },
   { to: '/browse', label: '空间与物品', icon: Boxes },
   { to: '/search', label: '搜索', icon: Search },
 ];

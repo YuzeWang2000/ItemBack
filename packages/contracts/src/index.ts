@@ -33,6 +33,7 @@ export interface NodeRecord {
   status: ItemStatus;
   acquiredDate: string | null;
   endDate: string | null;
+  expiryDate: string | null;
   valueAmount: string | null;
   currency: string | null;
   quantity: number;
@@ -45,8 +46,15 @@ export interface NodeRecord {
   holdingDays: number | null;
   dailyCost: string | null;
   coverAttachmentId: string | null;
+  tags: TagRecord[];
   path?: Array<{ id: string; name: string; nodeType: NodeType }>;
   children?: NodeRecord[];
+}
+
+export interface TagRecord {
+  id: string;
+  name: string;
+  itemCount?: number;
 }
 
 export interface AttachmentRecord {

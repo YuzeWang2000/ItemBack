@@ -11,6 +11,7 @@ import {
   ArrowRight,
   Box,
   CalendarDays,
+  Camera,
   Download,
   Edit3,
   File,
@@ -27,9 +28,9 @@ import {
   X,
 } from 'lucide-react';
 import { useMemo, useRef, useState, type DragEvent, type FormEvent } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api, ApiError, contentUrl } from '../api';
-import { ItemCard, itemStatusLabels as statusLabels } from '../components/ItemCard';
+import { getExpiryState, ItemCard, itemStatusLabels as statusLabels } from '../components/ItemCard';
 import { Empty, formatDate, formatMoney, Loading, Notice, PageHeader } from '../components/ui';
 
 const categoryLabels: Record<AttachmentCategory, string> = {
@@ -45,7 +46,11 @@ export function ItemDetailPage() {
   const { id = '' } = useParams();
   const client = useQueryClient();
   const navigate = useNavigate();
-  const [notice, setNotice] = useState<{ kind: 'error' | 'success'; text: string } | null>(null);
+  const location = useLocation();
+  const initialNotice = (location.state as { notice?: string } | null)?.notice;
+  const [notice, setNotice] = useState<{ kind: 'error' | 'success'; text: string } | null>(
+    initialNotice ? { kind: 'error', text: initialNotice } : null,
+  );
   const [moving, setMoving] = useState(false);
   const node = useQuery({ queryKey: ['node', id], queryFn: () => api<NodeRecord>(`/nodes/${id}`) });
   const children = useQuery({
@@ -64,6 +69,7 @@ export function ItemDetailPage() {
   if (node.isLoading) return <Loading />;
   if (node.error || !node.data) return <Notice>物品档案加载失败或已归档。</Notice>;
   const item = node.data;
+  const expiry = getExpiryState(item.expiryDate);
   const doArchive = async () => {
     if (!window.confirm(`确定归档“${item.name}”吗？归档后不会出现在当前物品树中。`)) return;
     setNotice(null);
@@ -72,6 +78,8 @@ export function ItemDetailPage() {
       await Promise.all([
         client.invalidateQueries({ queryKey: ['tree'] }),
         client.invalidateQueries({ queryKey: ['dashboard'] }),
+        client.invalidateQueries({ queryKey: ['items'] }),
+        client.invalidateQueries({ queryKey: ['tags'] }),
       ]);
       navigate('/browse');
     } catch (reason) {
@@ -123,6 +131,13 @@ export function ItemDetailPage() {
         </span>
         <div className="record-intro">
           <span className="status-pill">{statusLabels[item.status]}</span>
+          {item.tags.length > 0 && (
+            <div className="item-detail-tags" aria-label="物品标签">
+              {item.tags.map((tag) => (
+                <span key={tag.id}>#{tag.name}</span>
+              ))}
+            </div>
+          )}
           <p>{item.description || '这件物品还没有补充说明。'}</p>
           <div className="record-path">
             <MapPin size={15} />
@@ -133,6 +148,12 @@ export function ItemDetailPage() {
               </span>
             ))}
           </div>
+          {expiry && (
+            <div className={`expiry-banner ${expiry.tone}`}>
+              <CalendarDays size={15} />
+              {expiry.label}
+            </div>
+          )}
         </div>
         <div className="cost-block">
           <small>平均每日持有成本</small>
@@ -161,6 +182,10 @@ export function ItemDetailPage() {
               <Fact label="数量" value={`${item.quantity} 件`} />
               <Fact label="入手日期" value={formatDate(item.acquiredDate)} />
               <Fact label="结束日期" value={item.endDate ? formatDate(item.endDate) : '仍在持有'} />
+              <Fact
+                label="有效期至"
+                value={item.expiryDate ? formatDate(item.expiryDate) : '无有效期'}
+              />
               <Fact label="品牌" value={item.brand || '未记录'} />
               <Fact label="型号" value={item.model || '未记录'} />
               <Fact label="序列号" value={item.serialNumber || '未记录'} />
@@ -264,6 +289,7 @@ function AttachmentPanel({
   const [dragging, setDragging] = useState(false);
   const [message, setMessage] = useState<{ kind: 'error' | 'success'; text: string } | null>(null);
   const input = useRef<HTMLInputElement>(null);
+  const cameraInput = useRef<HTMLInputElement>(null);
   const client = useQueryClient();
   const upload = useMutation({
     mutationFn: async () => {
@@ -290,12 +316,15 @@ function AttachmentPanel({
       setFiles([]);
       setDescription('');
       if (input.current) input.current.value = '';
+      if (cameraInput.current) cameraInput.current.value = '';
       await Promise.all([
         client.invalidateQueries({ queryKey: ['attachments', itemId] }),
         client.invalidateQueries({ queryKey: ['node', itemId] }),
         client.invalidateQueries({ queryKey: ['children'] }),
         client.invalidateQueries({ queryKey: ['search'] }),
         client.invalidateQueries({ queryKey: ['dashboard'] }),
+        client.invalidateQueries({ queryKey: ['items'] }),
+        client.invalidateQueries({ queryKey: ['tags'] }),
       ]);
       setMessage({ kind: 'success', text: '附件已安全保存。' });
     } catch (reason) {
@@ -312,6 +341,8 @@ function AttachmentPanel({
         client.invalidateQueries({ queryKey: ['children'] }),
         client.invalidateQueries({ queryKey: ['search'] }),
         client.invalidateQueries({ queryKey: ['dashboard'] }),
+        client.invalidateQueries({ queryKey: ['items'] }),
+        client.invalidateQueries({ queryKey: ['tags'] }),
       ]);
     } catch (reason) {
       setMessage({ kind: 'error', text: reason instanceof ApiError ? reason.message : '删除失败' });
@@ -328,6 +359,21 @@ function AttachmentPanel({
       </div>
       <form onSubmit={submit}>
         {message && <Notice kind={message.kind}>{message.text}</Notice>}
+        <div className="quick-camera-row">
+          <label className="button secondary">
+            <Camera size={17} />
+            拍照添加
+            <input
+              ref={cameraInput}
+              hidden
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={(event) => accept(event.target.files)}
+            />
+          </label>
+          <small>手机端会直接打开后置摄像头。</small>
+        </div>
         <div
           className={`drop-zone ${dragging ? 'dragging' : ''}`}
           onDragEnter={() => setDragging(true)}

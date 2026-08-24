@@ -16,6 +16,7 @@ describe('ItemBack API critical flow (real PostgreSQL)', () => {
     prisma = new PrismaClient();
     await prisma.attachment.deleteMany();
     await prisma.movement.deleteMany();
+    await prisma.tag.deleteMany();
     await prisma.node.deleteMany();
     await prisma.authSession.deleteMany();
     await prisma.user.deleteMany();
@@ -57,8 +58,21 @@ describe('ItemBack API critical flow (real PostgreSQL)', () => {
 
     const home = (await agent.post('/api/v1/spaces').send({ name: '家' }).expect(201)).body;
     const office = (await agent.post('/api/v1/spaces').send({ name: '公司' }).expect(201)).body;
+    const emptySpace = (
+      await agent.post('/api/v1/spaces').send({ name: '待删除空空间' }).expect(201)
+    ).body;
+    await agent
+      .delete(`/api/v1/nodes/${emptySpace.id}`)
+      .expect(200)
+      .expect(({ body }) => expect(body).toMatchObject({ deleted: true }));
+    expect((await agent.get('/api/v1/spaces').expect(200)).body).not.toContainEqual(
+      expect.objectContaining({ id: emptySpace.id }),
+    );
     const acquired = new Date();
     acquired.setUTCDate(acquired.getUTCDate() - 59);
+    const expiry = new Date();
+    expiry.setUTCHours(0, 0, 0, 0);
+    expiry.setUTCDate(expiry.getUTCDate() + 30);
     const bag = (
       await agent
         .post('/api/v1/items')
@@ -69,17 +83,43 @@ describe('ItemBack API critical flow (real PostgreSQL)', () => {
           valueAmount: '600.00',
           currency: 'CNY',
           acquiredDate: acquired.toISOString().slice(0, 10),
+          expiryDate: expiry.toISOString().slice(0, 10),
+          tags: ['通勤', '日常'],
         })
         .expect(201)
     ).body;
     expect(bag.holdingDays).toBe(60);
     expect(bag.dailyCost).toBe('10.0000');
+    expect(bag.expiryDate).toBe(expiry.toISOString().slice(0, 10));
+    expect(bag.tags.map((tag: { name: string }) => tag.name)).toEqual(['日常', '通勤']);
 
     const book = (
-      await agent.post('/api/v1/items').send({ name: '书', parentId: bag.id }).expect(201)
+      await agent
+        .post('/api/v1/items')
+        .send({
+          name: '书',
+          parentId: bag.id,
+          expiryDate: expiry.toISOString().slice(0, 10),
+          tags: ['阅读', '日常'],
+        })
+        .expect(201)
     ).body;
     expect(book.valueAmount).toBeNull();
     expect(book.dailyCost).toBeNull();
+    const tagList = (await agent.get('/api/v1/tags').expect(200)).body;
+    const dailyTag = tagList.find((tag: { name: string }) => tag.name === '日常');
+    const readingTag = tagList.find((tag: { name: string }) => tag.name === '阅读');
+    expect(dailyTag.itemCount).toBe(2);
+    const dailyItems = (await agent.get('/api/v1/items').query({ tags: dailyTag.id }).expect(200))
+      .body;
+    expect(dailyItems.total).toBe(2);
+    const exactTaggedItems = (
+      await agent
+        .get('/api/v1/items')
+        .query({ tags: `${dailyTag.id},${readingTag.id}` })
+        .expect(200)
+    ).body;
+    expect(exactTaggedItems.items.map((item: { id: string }) => item.id)).toEqual([book.id]);
     await agent
       .post('/api/v1/items')
       .send({ name: '非法子物品', parentId: book.id })
@@ -151,13 +191,36 @@ describe('ItemBack API critical flow (real PostgreSQL)', () => {
     expect(officeChildren.find((item: { id: string }) => item.id === book.id)).toMatchObject({
       coverAttachmentId: uploaded[2].id,
     });
+    const editedBook = (
+      await agent
+        .patch(`/api/v1/nodes/${book.id}`)
+        .send({ tags: ['阅读', '办公'], expiryDate: expiry.toISOString().slice(0, 10) })
+        .expect(200)
+    ).body;
+    expect(editedBook.tags.map((tag: { name: string }) => tag.name)).toEqual(['办公', '阅读']);
+    const officeTag = (await agent.get('/api/v1/tags').expect(200)).body.find(
+      (tag: { name: string }) => tag.name === '办公',
+    );
+    expect(
+      (await agent.get('/api/v1/items').query({ tags: officeTag.id }).expect(200)).body.total,
+    ).toBe(1);
     await agent.delete(`/api/v1/attachments/${uploaded[0].id}`).expect(200);
 
     const search = (await agent.get('/api/v1/search').query({ q: '  书  ' }).expect(200)).body;
     expect(search.items[0].path.map((part: { name: string }) => part.name)).toEqual(['公司', '书']);
+    const tagSearch = (await agent.get('/api/v1/search').query({ q: '办公' }).expect(200)).body;
+    expect(tagSearch.items.map((item: { id: string }) => item.id)).toContain(book.id);
     const dashboard = (await agent.get('/api/v1/dashboard').expect(200)).body;
     expect(dashboard).toMatchObject({ itemCount: 3, spaceCount: 2 });
     expect(dashboard.valueTotals).toContainEqual({ currency: 'CNY', amount: '600.00' });
+
+    await agent
+      .delete(`/api/v1/nodes/${home.id}`)
+      .expect(409)
+      .expect(({ body }) => {
+        expect(body.code).toBe('NODE_NOT_EMPTY');
+        expect(body.message).toContain('清空后才能删除');
+      });
 
     await agent
       .delete(`/api/v1/nodes/${bag.id}`)

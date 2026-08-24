@@ -40,6 +40,18 @@ export class NodesController {
     return this.nodes.createItem(dto);
   }
 
+  @Get('items')
+  @ApiQuery({ name: 'status', required: false })
+  @ApiQuery({ name: 'tags', required: false, description: '逗号分隔的标签 ID' })
+  listItems(@Query('status') status?: string, @Query('tags') tags?: string) {
+    return this.nodes.listItems(status, tags);
+  }
+
+  @Get('tags')
+  listTags() {
+    return this.nodes.listTags();
+  }
+
   @Get('nodes/tree')
   tree() {
     return this.nodes.tree();

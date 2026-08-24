@@ -61,6 +61,7 @@ model Node {
   status        ItemStatus   @default(ACTIVE)
   acquiredDate  DateTime?    @db.Date
   endDate       DateTime?    @db.Date
+  expiryDate    DateTime?    @db.Date
   valueAmount   Decimal?     @db.Decimal(19, 4)
   currency      String?      @db.VarChar(3)
   quantity      Int          @default(1)
@@ -73,6 +74,7 @@ model Node {
   parent        Node?        @relation("NodeTree", fields: [parentId], references: [id], onDelete: Restrict)
   children      Node[]       @relation("NodeTree")
   attachments   Attachment[]
+  tags          NodeTag[]
   movements     Movement[]   @relation("MovementItem")
   movedFromHere Movement[]   @relation("MovementFrom")
   movedToHere   Movement[]   @relation("MovementTo")
@@ -80,6 +82,28 @@ model Node {
   @@index([parentId])
   @@index([nodeType, archivedAt])
   @@index([name])
+  @@index([expiryDate])
+}
+
+model Tag {
+  id             String    @id @default(uuid()) @db.Uuid
+  name           String    @db.VarChar(50)
+  normalizedName String    @unique @db.VarChar(50)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  nodes          NodeTag[]
+
+  @@index([name])
+}
+
+model NodeTag {
+  nodeId String @db.Uuid
+  tagId  String @db.Uuid
+  node   Node   @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([nodeId, tagId])
+  @@index([tagId, nodeId])
 }
 
 model Movement {

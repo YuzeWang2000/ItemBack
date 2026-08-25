@@ -48,7 +48,22 @@ test('核心用户流：登录、创建、嵌套、成本、附件、移动与�
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
     'base64',
   );
-  await page.locator('input[type=file]').setInputFiles([
+  await page.locator('.quick-camera-row input[type=file]').setInputFiles({
+    name: 'camera-photo.png',
+    mimeType: 'image/png',
+    buffer: png,
+  });
+  await expect(page.getByText('照片已自动上传。')).toBeVisible();
+  await expect(page.locator('.attachments-grid article')).toHaveCount(1);
+  await expect(page.locator('.record-glyph img')).toBeVisible();
+  await expect(page.locator('.record-glyph svg')).toHaveCount(0);
+  await expect(page.locator('.record-glyph img')).toHaveCSS('object-fit', 'contain');
+  await expect(page.locator('.record-glyph.has-image')).toHaveCSS(
+    'background-color',
+    'rgb(255, 255, 255)',
+  );
+
+  await page.locator('.drop-zone input[type=file]').setInputFiles([
     { name: 'book-front.png', mimeType: 'image/png', buffer: png },
     { name: 'book-back.png', mimeType: 'image/png', buffer: png },
     { name: 'manual.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.4 e2e') },
@@ -56,8 +71,13 @@ test('核心用户流：登录、创建、嵌套、成本、附件、移动与�
   ]);
   await page.getByRole('button', { name: '上传 4 个文件' }).click();
   await expect(page.getByText('附件已安全保存。')).toBeVisible();
-  await expect(page.locator('.attachments-grid article')).toHaveCount(4);
-  await expect(page.locator('.attachment-preview img')).toHaveCount(2);
+  await expect(page.locator('.attachments-grid article')).toHaveCount(5);
+  await expect(page.locator('.attachment-preview img')).toHaveCount(3);
+  await expect(page.locator('.attachment-preview img').first()).toHaveCSS('object-fit', 'contain');
+  const backPhoto = page.locator('.attachments-grid article').filter({ hasText: 'book-back.png' });
+  await backPhoto.getByRole('button', { name: '将 book-back.png 设为预览图' }).click();
+  await expect(page.getByText('已将“book-back.png”设为预览图。')).toBeVisible();
+  await expect(backPhoto.getByRole('button', { name: 'book-back.png 是当前预览图' })).toBeVisible();
 
   await page.getByRole('button', { name: '移动' }).click();
   await page.getByLabel('新位置').selectOption({ label: officeName });
@@ -69,7 +89,7 @@ test('核心用户流：登录、创建、嵌套、成本、附件、移动与�
 
   await page.goto(`/search?q=${encodeURIComponent(bookName)}`);
   await expect(page.getByText('找到 1 件相关物品')).toBeVisible();
-  await expect(page.getByText(`${officeName} / ${bookName}`)).toBeVisible();
+  await expect(page.getByText(officeName, { exact: true })).toBeVisible();
   await page.getByRole('link', { name: new RegExp(bookName) }).click();
   await expect(page.getByRole('heading', { name: bookName })).toBeVisible();
 

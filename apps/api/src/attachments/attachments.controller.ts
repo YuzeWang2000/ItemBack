@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
   Res,
@@ -47,6 +48,14 @@ export class AttachmentsController {
   @Get('items/:itemId/attachments')
   list(@Param('itemId', ParseUUIDPipe) itemId: string) {
     return this.attachments.list(itemId);
+  }
+
+  @Patch('items/:itemId/cover/:attachmentId')
+  setCover(
+    @Param('itemId', ParseUUIDPipe) itemId: string,
+    @Param('attachmentId', ParseUUIDPipe) attachmentId: string,
+  ) {
+    return this.attachments.setCover(itemId, attachmentId);
   }
 
   @Get('attachments/:id/content')

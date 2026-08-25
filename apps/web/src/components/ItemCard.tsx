@@ -33,10 +33,12 @@ export function ItemCard({ item, showPath = false }: { item: NodeRecord; showPat
     .join(' / ');
   return (
     <Link className="item-card" to={`/items/${item.id}`} aria-label={`查看物品 ${item.name}`}>
-      <div className="item-card-media">
-        <span className={`item-card-fallback ${item.isContainer ? 'container' : ''}`}>
-          {item.isContainer ? <PackageOpen /> : <Box />}
-        </span>
+      <div className={`item-card-media ${item.coverAttachmentId ? 'has-image' : ''}`}>
+        {!item.coverAttachmentId && (
+          <span className={`item-card-fallback ${item.isContainer ? 'container' : ''}`}>
+            {item.isContainer ? <PackageOpen /> : <Box />}
+          </span>
+        )}
         {item.coverAttachmentId && (
           <img
             src={contentUrl(item.coverAttachmentId)}

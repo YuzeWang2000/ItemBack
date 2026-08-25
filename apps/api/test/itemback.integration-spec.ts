@@ -191,6 +191,32 @@ describe('ItemBack API critical flow (real PostgreSQL)', () => {
     expect(officeChildren.find((item: { id: string }) => item.id === book.id)).toMatchObject({
       coverAttachmentId: uploaded[2].id,
     });
+    const alternatePhoto = (
+      await agent
+        .post(`/api/v1/items/${book.id}/attachments`)
+        .field('category', 'PHOTO')
+        .attach('files', Buffer.from('fake jpg bytes'), {
+          filename: '物品侧面.jpg',
+          contentType: 'image/jpeg',
+        })
+        .expect(201)
+    ).body[0];
+    await agent
+      .patch(`/api/v1/items/${book.id}/cover/${uploaded[0].id}`)
+      .expect(404)
+      .expect(({ body }) => expect(body.code).toBe('PREVIEW_IMAGE_NOT_FOUND'));
+    await agent
+      .patch(`/api/v1/items/${book.id}/cover/${alternatePhoto.id}`)
+      .expect(200)
+      .expect(({ body }) => expect(body.coverAttachmentId).toBe(alternatePhoto.id));
+    expect((await agent.get(`/api/v1/nodes/${book.id}`).expect(200)).body.coverAttachmentId).toBe(
+      alternatePhoto.id,
+    );
+    await agent.delete(`/api/v1/attachments/${alternatePhoto.id}`).expect(200);
+    expect((await agent.get(`/api/v1/nodes/${book.id}`).expect(200)).body.coverAttachmentId).toBe(
+      uploaded[2].id,
+    );
+
     const editedBook = (
       await agent
         .patch(`/api/v1/nodes/${book.id}`)

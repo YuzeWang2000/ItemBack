@@ -461,7 +461,7 @@ export class NodesService {
       acquiredDate: node.acquiredDate?.toISOString().slice(0, 10) ?? null,
       endDate: node.endDate?.toISOString().slice(0, 10) ?? null,
       expiryDate: node.expiryDate?.toISOString().slice(0, 10) ?? null,
-      coverAttachmentId: attachments?.[0]?.id ?? null,
+      coverAttachmentId: node.coverAttachmentId ?? attachments?.[0]?.id ?? null,
       tags: tags?.map(({ tag }) => tag) ?? [],
       ...metrics,
       ...(path ? { path } : {}),

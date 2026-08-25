@@ -245,7 +245,8 @@ button {
 .button:hover:not(:disabled) {
   transform: translateY(-1px);
 }
-.button:disabled {
+.button:disabled,
+.button.is-disabled {
   opacity: 0.58;
   cursor: not-allowed;
 }
@@ -1105,13 +1106,18 @@ button {
     radial-gradient(circle at 50% 38%, rgba(255, 255, 255, 0.96), transparent 38%),
     linear-gradient(145deg, #f4f1e9, #eef1eb);
 }
+.item-card-media.has-image {
+  background: #fff;
+}
+
 .item-card-media img {
   position: absolute;
   z-index: 1;
   inset: 0;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  background: #fff;
+  object-fit: contain;
 }
 .item-card-fallback {
   display: grid;
@@ -1286,13 +1292,18 @@ button {
   width: 28px;
   height: 28px;
 }
+.record-glyph.has-image {
+  background: #fff;
+}
+
 .record-glyph img {
   position: absolute;
   z-index: 1;
   inset: 0;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  background: #fff;
+  object-fit: contain;
 }
 .record-intro {
   min-width: 0;
@@ -1528,6 +1539,11 @@ button {
   border-radius: 9px;
   background: #fff;
 }
+.attachments-grid article.is-cover {
+  border-color: #769b8b;
+  box-shadow: inset 0 0 0 1px rgba(65, 111, 93, 0.15);
+}
+
 .attachment-preview,
 .file-glyph {
   display: grid;
@@ -1536,13 +1552,14 @@ button {
   place-items: center;
   border-radius: 6px;
   overflow: hidden;
-  background: #eeeae2;
+  background: #fff;
   color: #8b795f;
 }
 .attachment-preview img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  background: #fff;
+  object-fit: contain;
 }
 .file-glyph svg {
   width: 20px;
@@ -1572,6 +1589,7 @@ button {
 }
 .file-actions {
   display: flex;
+  gap: 2px;
 }
 .file-actions .icon-button {
   width: 30px;
@@ -1580,6 +1598,20 @@ button {
 .danger-text {
   color: var(--danger);
 }
+.file-actions .icon-button.is-active {
+  background: #e4eee8;
+  color: var(--forest);
+}
+.cover-label {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: #e4eee8;
+  color: var(--forest);
+  font-weight: 700;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;

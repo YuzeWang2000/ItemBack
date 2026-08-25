@@ -13,6 +13,7 @@ const makeNode = (data: Partial<Node>): Node => ({
   id: id.item,
   nodeType: NodeType.ITEM,
   parentId: id.home,
+  coverAttachmentId: null,
   name: '书包',
   description: null,
   isContainer: true,

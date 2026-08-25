@@ -23,6 +23,7 @@ import {
   Paperclip,
   Plus,
   ShieldCheck,
+  Star,
   Trash2,
   UploadCloud,
   X,
@@ -119,14 +120,19 @@ export function ItemDetailPage() {
       />
       {notice && <Notice kind={notice.kind}>{notice.text}</Notice>}
       <section className="record-hero">
-        <span className={`record-glyph ${item.isContainer ? 'container' : ''}`}>
-          {item.isContainer ? <PackageOpen /> : <Box />}
-          {item.coverAttachmentId && (
+        <span
+          className={`record-glyph ${item.isContainer ? 'container' : ''} ${item.coverAttachmentId ? 'has-image' : ''}`}
+        >
+          {item.coverAttachmentId ? (
             <img
               src={contentUrl(item.coverAttachmentId)}
               alt={`${item.name} 的图片`}
               loading="eager"
             />
+          ) : item.isContainer ? (
+            <PackageOpen />
+          ) : (
+            <Box />
           )}
         </span>
         <div className="record-intro">
@@ -217,6 +223,7 @@ export function ItemDetailPage() {
           )}
           <AttachmentPanel
             itemId={id}
+            coverAttachmentId={item.coverAttachmentId}
             items={attachments.data ?? []}
             loading={attachments.isLoading}
           />
@@ -276,10 +283,12 @@ function Fact({ label, value }: { label: string; value: string }) {
 
 function AttachmentPanel({
   itemId,
+  coverAttachmentId,
   items,
   loading,
 }: {
   itemId: string;
+  coverAttachmentId: string | null;
   items: AttachmentRecord[];
   loading: boolean;
 }) {
@@ -291,14 +300,28 @@ function AttachmentPanel({
   const input = useRef<HTMLInputElement>(null);
   const cameraInput = useRef<HTMLInputElement>(null);
   const client = useQueryClient();
+  const refresh = () =>
+    Promise.all([
+      client.invalidateQueries({ queryKey: ['attachments', itemId] }),
+      client.invalidateQueries({ queryKey: ['node', itemId] }),
+      client.invalidateQueries({ queryKey: ['children'] }),
+      client.invalidateQueries({ queryKey: ['search'] }),
+      client.invalidateQueries({ queryKey: ['dashboard'] }),
+      client.invalidateQueries({ queryKey: ['items'] }),
+      client.invalidateQueries({ queryKey: ['tags'] }),
+    ]);
   const upload = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (selectedFiles: File[]) => {
       const body = new FormData();
-      files.forEach((file) => body.append('files', file));
+      selectedFiles.forEach((file) => body.append('files', file));
       body.append('category', category);
       if (description) body.append('description', description);
       return api(`/items/${itemId}/attachments`, { method: 'POST', body });
     },
+  });
+  const cover = useMutation({
+    mutationFn: (attachmentId: string) =>
+      api(`/items/${itemId}/cover/${attachmentId}`, { method: 'PATCH' }),
   });
   const accept = (list: FileList | null) => {
     if (list) setFiles((old) => [...old, ...Array.from(list)].slice(0, 20));
@@ -308,44 +331,56 @@ function AttachmentPanel({
     setDragging(false);
     accept(event.dataTransfer.files);
   };
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
+  const persist = async (selectedFiles: File[], successText: string) => {
     setMessage(null);
     try {
-      await upload.mutateAsync();
-      setFiles([]);
-      setDescription('');
-      if (input.current) input.current.value = '';
-      if (cameraInput.current) cameraInput.current.value = '';
-      await Promise.all([
-        client.invalidateQueries({ queryKey: ['attachments', itemId] }),
-        client.invalidateQueries({ queryKey: ['node', itemId] }),
-        client.invalidateQueries({ queryKey: ['children'] }),
-        client.invalidateQueries({ queryKey: ['search'] }),
-        client.invalidateQueries({ queryKey: ['dashboard'] }),
-        client.invalidateQueries({ queryKey: ['items'] }),
-        client.invalidateQueries({ queryKey: ['tags'] }),
-      ]);
-      setMessage({ kind: 'success', text: '附件已安全保存。' });
+      await upload.mutateAsync(selectedFiles);
+      await refresh();
+      setMessage({ kind: 'success', text: successText });
+      return true;
     } catch (reason) {
       setMessage({ kind: 'error', text: reason instanceof ApiError ? reason.message : '上传失败' });
+      return false;
     }
+  };
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!(await persist(files, '附件已安全保存。'))) return;
+    setFiles([]);
+    setDescription('');
+    if (input.current) input.current.value = '';
+    if (cameraInput.current) cameraInput.current.value = '';
+  };
+  const capture = async (list: FileList | null) => {
+    const captured = Array.from(list ?? []);
+    if (!captured.length) return;
+    if (await persist(captured, '照片已自动上传。')) {
+      if (!files.length) setDescription('');
+    } else {
+      setFiles((old) => [...old, ...captured].slice(0, 20));
+    }
+    if (cameraInput.current) cameraInput.current.value = '';
   };
   const remove = async (file: AttachmentRecord) => {
     if (!window.confirm(`删除附件“${file.originalFilename}”吗？此操作会同步删除存储文件。`)) return;
     try {
       await api(`/attachments/${file.id}`, { method: 'DELETE' });
-      await Promise.all([
-        client.invalidateQueries({ queryKey: ['attachments', itemId] }),
-        client.invalidateQueries({ queryKey: ['node', itemId] }),
-        client.invalidateQueries({ queryKey: ['children'] }),
-        client.invalidateQueries({ queryKey: ['search'] }),
-        client.invalidateQueries({ queryKey: ['dashboard'] }),
-        client.invalidateQueries({ queryKey: ['items'] }),
-        client.invalidateQueries({ queryKey: ['tags'] }),
-      ]);
+      await refresh();
     } catch (reason) {
       setMessage({ kind: 'error', text: reason instanceof ApiError ? reason.message : '删除失败' });
+    }
+  };
+  const chooseCover = async (file: AttachmentRecord) => {
+    setMessage(null);
+    try {
+      await cover.mutateAsync(file.id);
+      await refresh();
+      setMessage({ kind: 'success', text: `已将“${file.originalFilename}”设为预览图。` });
+    } catch (reason) {
+      setMessage({
+        kind: 'error',
+        text: reason instanceof ApiError ? reason.message : '预览图设置失败',
+      });
     }
   };
   return (
@@ -360,19 +395,23 @@ function AttachmentPanel({
       <form onSubmit={submit}>
         {message && <Notice kind={message.kind}>{message.text}</Notice>}
         <div className="quick-camera-row">
-          <label className="button secondary">
+          <label
+            className={`button secondary ${upload.isPending ? 'is-disabled' : ''}`}
+            aria-disabled={upload.isPending}
+          >
             <Camera size={17} />
-            拍照添加
+            {upload.isPending ? '正在上传…' : '拍照添加'}
             <input
               ref={cameraInput}
               hidden
               type="file"
               accept="image/*"
               capture="environment"
-              onChange={(event) => accept(event.target.files)}
+              disabled={upload.isPending}
+              onChange={(event) => void capture(event.target.files)}
             />
           </label>
-          <small>手机端会直接打开后置摄像头。</small>
+          <small>拍照确认后会立即上传；失败时会保留到待上传列表。</small>
         </div>
         <div
           className={`drop-zone ${dragging ? 'dragging' : ''}`}
@@ -441,7 +480,10 @@ function AttachmentPanel({
       ) : items.length ? (
         <div className="attachments-grid">
           {items.map((file) => (
-            <article key={file.id}>
+            <article
+              key={file.id}
+              className={file.id === coverAttachmentId ? 'is-cover' : undefined}
+            >
               {file.mimeType.startsWith('image/') && file.mimeType !== 'image/svg+xml' ? (
                 <a
                   className="attachment-preview"
@@ -466,10 +508,29 @@ function AttachmentPanel({
                 <strong title={file.originalFilename}>{file.originalFilename}</strong>
                 <p>
                   {categoryLabels[file.category]} · {formatBytes(file.size)}
+                  {file.id === coverAttachmentId && <span className="cover-label">预览图</span>}
                 </p>
                 {file.description && <small>{file.description}</small>}
               </div>
               <div className="file-actions">
+                {file.mimeType.startsWith('image/') && file.mimeType !== 'image/svg+xml' && (
+                  <button
+                    className={`icon-button ${file.id === coverAttachmentId ? 'is-active' : ''}`}
+                    onClick={() => chooseCover(file)}
+                    disabled={file.id === coverAttachmentId || cover.isPending}
+                    aria-label={
+                      file.id === coverAttachmentId
+                        ? `${file.originalFilename} 是当前预览图`
+                        : `将 ${file.originalFilename} 设为预览图`
+                    }
+                    title={file.id === coverAttachmentId ? '当前预览图' : '设为预览图'}
+                  >
+                    <Star
+                      size={16}
+                      fill={file.id === coverAttachmentId ? 'currentColor' : 'none'}
+                    />
+                  </button>
+                )}
                 <a
                   className="icon-button"
                   href={contentUrl(file.id, true)}

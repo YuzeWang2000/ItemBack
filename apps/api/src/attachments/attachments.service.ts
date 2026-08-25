@@ -5,6 +5,8 @@ import { PrismaService } from '../prisma/prisma.service';
 import { FILE_STORAGE, type FileStorage } from './storage/storage.interface';
 import { UploadAttachmentDto } from './upload-attachment.dto';
 
+const previewMimeTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif'];
+
 export function normalizeOriginalFilename(name: string) {
   const withoutPath = name.replace(/^.*[\\/]/, '');
   const isLatin1 = [...withoutPath].every((character) => character.charCodeAt(0) <= 255);
@@ -76,6 +78,29 @@ export class AttachmentsService {
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
     });
     return files.map((attachment) => this.present(attachment));
+  }
+
+  async setCover(itemId: string, attachmentId: string) {
+    const attachment = await this.prisma.attachment.findFirst({
+      where: {
+        id: attachmentId,
+        itemId,
+        mimeType: { in: previewMimeTypes },
+        item: { nodeType: NodeType.ITEM, archivedAt: null },
+      },
+      select: { id: true },
+    });
+    if (!attachment) {
+      throw new NotFoundException({
+        code: 'PREVIEW_IMAGE_NOT_FOUND',
+        message: '所选图片不存在或不属于这个物品',
+      });
+    }
+    await this.prisma.node.update({
+      where: { id: itemId },
+      data: { coverAttachmentId: attachment.id },
+    });
+    return { itemId, coverAttachmentId: attachment.id };
   }
 
   async content(id: string) {

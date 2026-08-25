@@ -52,37 +52,40 @@ model AuthSession {
 }
 
 model Node {
-  id            String       @id @default(uuid()) @db.Uuid
-  nodeType      NodeType
-  parentId      String?      @db.Uuid
-  name          String       @db.VarChar(200)
-  description   String?      @db.Text
-  isContainer   Boolean      @default(false)
-  status        ItemStatus   @default(ACTIVE)
-  acquiredDate  DateTime?    @db.Date
-  endDate       DateTime?    @db.Date
-  expiryDate    DateTime?    @db.Date
-  valueAmount   Decimal?     @db.Decimal(19, 4)
-  currency      String?      @db.VarChar(3)
-  quantity      Int          @default(1)
-  brand         String?      @db.VarChar(200)
-  model         String?      @db.VarChar(200)
-  serialNumber  String?      @db.VarChar(300)
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-  archivedAt    DateTime?
-  parent        Node?        @relation("NodeTree", fields: [parentId], references: [id], onDelete: Restrict)
-  children      Node[]       @relation("NodeTree")
-  attachments   Attachment[]
-  tags          NodeTag[]
-  movements     Movement[]   @relation("MovementItem")
-  movedFromHere Movement[]   @relation("MovementFrom")
-  movedToHere   Movement[]   @relation("MovementTo")
+  id                String       @id @default(uuid()) @db.Uuid
+  nodeType          NodeType
+  parentId          String?      @db.Uuid
+  coverAttachmentId String?      @db.Uuid
+  name              String       @db.VarChar(200)
+  description       String?      @db.Text
+  isContainer       Boolean      @default(false)
+  status            ItemStatus   @default(ACTIVE)
+  acquiredDate      DateTime?    @db.Date
+  endDate           DateTime?    @db.Date
+  expiryDate        DateTime?    @db.Date
+  valueAmount       Decimal?     @db.Decimal(19, 4)
+  currency          String?      @db.VarChar(3)
+  quantity          Int          @default(1)
+  brand             String?      @db.VarChar(200)
+  model             String?      @db.VarChar(200)
+  serialNumber      String?      @db.VarChar(300)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  archivedAt        DateTime?
+  parent            Node?        @relation("NodeTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children          Node[]       @relation("NodeTree")
+  attachments       Attachment[] @relation("ItemAttachments")
+  coverAttachment   Attachment?  @relation("NodeCoverAttachment", fields: [coverAttachmentId], references: [id], onDelete: SetNull)
+  tags              NodeTag[]
+  movements         Movement[]   @relation("MovementItem")
+  movedFromHere     Movement[]   @relation("MovementFrom")
+  movedToHere       Movement[]   @relation("MovementTo")
 
   @@index([parentId])
   @@index([nodeType, archivedAt])
   @@index([name])
   @@index([expiryDate])
+  @@index([coverAttachmentId])
 }
 
 model Tag {
@@ -132,7 +135,8 @@ model Attachment {
   description      String?            @db.VarChar(1000)
   sortOrder        Int                @default(0)
   createdAt        DateTime           @default(now())
-  item             Node               @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  item             Node               @relation("ItemAttachments", fields: [itemId], references: [id], onDelete: Cascade)
+  coverFor         Node[]             @relation("NodeCoverAttachment")
 
   @@index([itemId, sortOrder, createdAt])
 }

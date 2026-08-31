@@ -5,6 +5,9 @@ coverage/
 playwright-report/
 test-results/
 .test-data/
+data/
+backups/
+migration/
 .env
 .env.*
 !.env.example

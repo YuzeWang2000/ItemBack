@@ -28,7 +28,7 @@ apps/
   web/                 React + Vite + Tailwind CSS Web 客户端
 packages/
   contracts/           前后端共享的枚举与响应类型
-scripts/               隔离 PostgreSQL 集成/E2E 测试启动器
+scripts/               开发测试、生产初始化/备份/重置和旧数据合并脚本
 tests/e2e/             Playwright 关键用户流
 docs/                  架构和业务规则说明
 docker-compose.yml     本地 PostgreSQL
@@ -42,7 +42,7 @@ docker-compose.prod.yml 生产容器参考
 - Docker Desktop / Docker Engine + Compose（常规本地开发）
 - 支持当前平台的 embedded-postgres 二进制（自动化测试使用；不替代开发或生产数据库）
 
-先确认 Docker Desktop 已启动，并在终端中验证：
+先确认 Docker Desktop / Docker Engine 已启动，并在终端中验证：
 
 ```powershell
 docker --version
@@ -55,13 +55,63 @@ docker compose version
 $env:Path += ";$env:LOCALAPPDATA\Programs\DockerDesktop\resources\bin"
 ```
 
-## 本地启动
+macOS 和 Linux 通常可直接在 Bash/Zsh 中执行本文的 `bash` 命令。Windows 建议使用 PowerShell；本地开发复制环境文件时分别使用：
+
+```powershell
+# Windows PowerShell
+Copy-Item .env.example .env
+```
+
+```bash
+# macOS / Linux
+cp .env.example .env
+```
+
+## 生产 Docker 快速使用
+
+生产模式下，PostgreSQL、API 和 Web 都运行在 Docker 中。首次部署或代码、依赖、Docker 配置有变化时：
+
+```bash
+pnpm prod:init
+```
+
+也可绕过 pnpm，直接执行同一个脚本：
+
+```bash
+bash scripts/prod-init.sh
+```
+
+`prod:init` 会创建/检查宿主机数据目录、确保数据库存在、构建镜像、执行 Prisma migrations 并启动服务。它可以重复执行，不会清空已有数据。工作区已关闭 pnpm 的“运行脚本前自动安装依赖”，因此该命令不会先在宿主机下载整套开发依赖；构建镜像时仍会在 Docker 内安装当前 Linux 架构所需依赖。
+
+日常启停的简单记忆：
+
+```bash
+# 停止并删除容器/网络；不删除宿主机数据
+docker compose --env-file .env.production -f docker-compose.prod.yml down
+
+# 代码没变：使用已有镜像快速启动
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d
+
+# 代码、依赖或 Docker 配置有变化：重新检查、构建并启动
+pnpm prod:init
+```
+
+查看状态和日志：
+
+```bash
+docker compose --env-file .env.production -f docker-compose.prod.yml ps
+docker compose --env-file .env.production -f docker-compose.prod.yml logs --tail=100
+```
+
+默认 Web 地址为 <http://localhost:8080>。同一局域网设备使用 `http://<Mac或服务器的局域网IP>:8080`；macOS 可用 `ipconfig getifaddr en0` 查询常见主网络接口地址。
+
+不要在生产命令后添加 `-v`，不要删除 `ITEMBACK_DATA_DIR` 指向的目录。虽然 bind mount 数据不随容器消失，但仍需定期执行成对备份。
+
+## 本地开发启动
 
 1. 创建环境文件并修改密码：
 
-   ```powershell
-   Copy-Item .env.example .env
-   ```
+   Windows PowerShell 使用 `Copy-Item .env.example .env`；macOS/Linux 使用 `cp .env.example .env`。
 
    至少修改 `POSTGRES_PASSWORD`、`DATABASE_URL` 中对应的密码，以及 `ADMIN_PASSWORD`。两个数据库密码必须一致；直接写入连接串时，请使用 URL 安全字符，或对特殊字符做 URL 编码。不要提交 `.env`。
 
@@ -120,6 +170,9 @@ $env:Path += ";$env:LOCALAPPDATA\Programs\DockerDesktop\resources\bin"
 | `pnpm db:migrate`       | 在开发数据库创建/应用迁移                                 |
 | `pnpm db:seed`          | 可重复写入示例数据和初始化账号                            |
 | `pnpm db:reset`         | **删除当前数据库全部数据**，重放迁移与 seed               |
+| `pnpm prod:init`        | 检查宿主机数据目录、构建并启动生产 Docker 服务            |
+| `pnpm prod:backup`      | 成对备份生产数据库和附件                                  |
+| `pnpm prod:reset`       | 确认并备份后，重置生产数据库和全部附件                    |
 
 首次运行浏览器测试前需安装 Chromium：
 
@@ -129,7 +182,35 @@ pnpm exec playwright install chromium
 
 测试命令会通过 `embedded-postgres` 自动启动与停止独立的真实 PostgreSQL，端口固定为 55432/55433，并且只会清理仓库内 `.test-data/` 下的专用目录。运行环境必须允许启动本机子进程；包管理器会按 Windows、Linux 或 macOS 的当前平台安装对应二进制。
 
-## 数据库重置与备份
+## 数据存储、备份与重置
+
+生产 Compose 不把正式数据只放在 Docker Desktop 内部 volume，而是通过 bind mount 写入 `ITEMBACK_DATA_DIR`：
+
+```text
+ITEMBACK_DATA_DIR/
+├── postgres/  PostgreSQL 物理数据（禁止手工编辑）
+└── storage/   图片、PDF 和其他附件
+```
+
+删除或重建容器不会删除这些文件；卸载 Docker Desktop 也不会主动删除该宿主机目录。但是，误删目录、磁盘损坏或删除整个项目仍会丢失数据，所以必须保留独立备份。
+
+创建数据库与附件同一时间点的一致性备份：
+
+```bash
+pnpm prod:backup
+```
+
+默认输出到 `backups/manual-日期时间/`，其中包含 `itemback.dump`、`storage.tar.gz` 和 `SHA256SUMS`。建议再复制到另一块磁盘、NAS 或可信备份服务。
+
+重置生产数据：
+
+```bash
+pnpm prod:reset
+```
+
+脚本会先自动备份，并要求输入 `RESET ITEMBACK` 后才清空数据库与附件。自动化环境可显式使用 `bash scripts/prod-reset.sh --yes`，但不要将 `--yes` 放进日常启动流程。完整说明见 [宿主机数据维护](docs/LOCAL_DATA.md)。
+
+拿到旧 PostgreSQL dump 和对应附件目录后，可先预检、再事务合并到当前数据；旧节点和附件会重映射 ID，不直接覆盖现有记录。完整步骤见 [旧 Windows 数据合并](docs/MAC_DATA_MERGE.md)。
 
 开发环境完全重置：
 
@@ -137,15 +218,17 @@ pnpm exec playwright install chromium
 pnpm db:reset
 ```
 
-该命令不可恢复。日常备份建议同时保存 PostgreSQL dump 和 `STORAGE_DIR` 指向的附件目录；只备份其中一方会造成附件记录与文件不一致。
+该命令不可恢复。开发和生产环境都必须同时保存 PostgreSQL dump 与附件；只备份其中一方会造成附件记录与文件不一致。
 
 ## 环境变量
 
 完整清单和安全默认说明见 [.env.example](.env.example)。重要项：
 
 - `DATABASE_URL`：PostgreSQL 连接串
+- `ITEMBACK_DATA_DIR`：生产数据库和附件的宿主机绝对路径
 - `ADMIN_EMAIL` / `ADMIN_PASSWORD`：单用户首次初始化账号
 - `WEB_ORIGIN`：允许携带 Cookie 调用 API 的精确前端源
+- `COOKIE_SECURE`：HTTPS 部署保持 `true`；仅限可信局域网的 HTTP 部署设为 `false`
 - `STORAGE_DIR`：后端私有附件目录，不应由 Nginx/静态服务器公开
 - `MAX_FILE_SIZE_MB`：单文件大小上限，默认 25 MiB
 - `SESSION_DAYS`：会话有效天数
@@ -156,12 +239,14 @@ pnpm db:reset
 仓库提供 [docker-compose.prod.yml](docker-compose.prod.yml)、[API Dockerfile](Dockerfile.api) 与 [Web Dockerfile](Dockerfile.web)。在可信服务器上：
 
 1. 从 `.env.production.example` 创建不提交版本库的 `.env.production`，使用随机高强度数据库与管理员密码；保持 `POSTGRES_PASSWORD` 与 `DATABASE_URL` 内经 URL 编码的密码一致。生产 `DATABASE_URL` 的主机必须是 Compose 服务名 `postgres`，并把 `WEB_ORIGIN` 设置为实际 HTTPS 站点。
-2. 为 `itemback_postgres_prod` 和 `itemback_storage_prod` 配置持久化备份。
-3. 执行 `docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build`。
+2. 把 `ITEMBACK_DATA_DIR` 设置为可信宿主机上的绝对路径，并为数据库和附件配置成对备份。
+3. 执行 `pnpm prod:init`（或 `bash scripts/prod-init.sh`）。
 4. 在公网入口终止 TLS；不要直接暴露 PostgreSQL 端口。
 5. 部署前先在独立数据库运行 `pnpm verify`，并保留数据库与附件目录的同一时间点备份。
 
 Web 容器会把 `/api/` 反向代理到 API；API 容器启动前执行 `prisma migrate deploy`。本参考是单机部署基线，高可用环境应把 PostgreSQL 和附件存储换成托管数据库与实现同一 `FileStorage` 接口的对象存储。
+
+生产数据使用 `ITEMBACK_DATA_DIR` 指向的宿主机目录，不依赖 Docker Desktop 内部 volume。初始化、日常启停、成对备份和带确认的重置流程见 [宿主机数据维护](docs/LOCAL_DATA.md)。
 
 ## 当前有意保留的限制
 

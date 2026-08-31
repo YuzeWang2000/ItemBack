@@ -16,7 +16,10 @@
     "db:generate": "pnpm --filter @itemback/api prisma:generate",
     "db:migrate": "node scripts/run-db-command.mjs prisma:migrate",
     "db:seed": "node scripts/run-db-command.mjs prisma:seed",
-    "db:reset": "node scripts/run-db-command.mjs prisma:reset"
+    "db:reset": "node scripts/run-db-command.mjs prisma:reset",
+    "prod:init": "bash scripts/prod-init.sh",
+    "prod:backup": "bash scripts/prod-backup.sh",
+    "prod:reset": "bash scripts/prod-reset.sh"
   },
   "devDependencies": {
     "@eslint/js": "^9.34.0",
@@ -29,8 +32,5 @@
     "prettier": "^3.6.2",
     "typescript": "^5.9.2",
     "typescript-eslint": "^8.41.0"
-  },
-  "optionalDependencies": {
-    "@embedded-postgres/windows-x64": "18.1.0-beta.15"
   }
 }

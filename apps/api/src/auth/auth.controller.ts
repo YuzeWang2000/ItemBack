@@ -25,7 +25,7 @@ export class AuthController {
     response.cookie('itemback_session', result.token, {
       httpOnly: true,
       sameSite: 'lax',
-      secure: this.config.get('NODE_ENV') === 'production',
+      secure: this.config.get('COOKIE_SECURE', 'true').toLowerCase() !== 'false',
       expires: result.expiresAt,
       path: '/',
     });

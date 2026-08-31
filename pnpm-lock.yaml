@@ -38,10 +38,6 @@ importers:
       typescript-eslint:
         specifier: ^8.41.0
         version: 8.67.0(eslint@9.39.5(jiti@2.7.0)(supports-color@8.1.1))(supports-color@8.1.1)(typescript@5.9.2)
-    optionalDependencies:
-      '@embedded-postgres/windows-x64':
-        specifier: 18.1.0-beta.15
-        version: 18.1.0-beta.15
 
   apps/api:
     dependencies:

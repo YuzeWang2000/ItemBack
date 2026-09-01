@@ -185,6 +185,17 @@ describe('ItemBack API critical flow (real PostgreSQL)', () => {
     expect(uploaded[0]).not.toHaveProperty('storageKey');
     expect(uploaded[1].originalFilename).toBe('unsafe.html');
     expect(uploaded[2].originalFilename).toBe('物品照片.png');
+    const renamedManual = (
+      await agent
+        .patch(`/api/v1/attachments/${uploaded[0].id}`)
+        .send({ filename: '../购买资料.pdf' })
+        .expect(200)
+    ).body;
+    expect(renamedManual.originalFilename).toBe('购买资料.pdf');
+    await agent
+      .patch(`/api/v1/attachments/${uploaded[0].id}`)
+      .send({ filename: '   ' })
+      .expect(400);
     const unavailableJob = (
       await agent.post(`/api/v1/attachments/${uploaded[2].id}/remove-background`).expect(201)
     ).body;
@@ -204,6 +215,7 @@ describe('ItemBack API critical flow (real PostgreSQL)', () => {
       .expect('Content-Disposition', /^attachment/);
     const listed = (await agent.get(`/api/v1/items/${book.id}/attachments`).expect(200)).body;
     expect(listed).toHaveLength(3);
+    expect(listed[0].originalFilename).toBe('购买资料.pdf');
     const officeChildren = (await agent.get(`/api/v1/nodes/${office.id}/children`).expect(200))
       .body;
     expect(officeChildren.find((item: { id: string }) => item.id === book.id)).toMatchObject({

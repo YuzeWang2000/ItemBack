@@ -18,8 +18,9 @@ import type { Response } from 'express';
 import { createReadStream } from 'node:fs';
 import { memoryStorage } from 'multer';
 import { AttachmentsService } from './attachments.service';
-import { UploadAttachmentDto } from './upload-attachment.dto';
 import { BackgroundRemovalService } from './background-removal.service';
+import { RenameAttachmentDto } from './rename-attachment.dto';
+import { UploadAttachmentDto } from './upload-attachment.dto';
 
 const maxFileSize = Math.max(1, Number(process.env.MAX_FILE_SIZE_MB ?? 25)) * 1024 * 1024;
 const inlineTypes = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif']);
@@ -60,6 +61,11 @@ export class AttachmentsController {
     @Param('attachmentId', ParseUUIDPipe) attachmentId: string,
   ) {
     return this.attachments.setCover(itemId, attachmentId);
+  }
+
+  @Patch('attachments/:id')
+  rename(@Param('id', ParseUUIDPipe) id: string, @Body() dto: RenameAttachmentDto) {
+    return this.attachments.rename(id, dto.filename);
   }
 
   @Get('attachments/:id/content')

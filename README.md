@@ -13,14 +13,18 @@ ItemBack 是一个面向长期持有的个人物品档案系统。它用空间�
 - 全部物品卡片视图，支持状态与多标签组合筛选
 - 物品有效期、多标签创建/选择/编辑，以及按标签搜索
 - 品牌中文名或常用名与品牌英文名分别记录，并可按任一名称搜索
+- 日期保留原生选择器，并支持按年份快速定位到多年前的具体日期
 - 多文件拖放/选择上传、Web 随手拍，图片预览，PDF/文档/压缩包下载，认证访问与安全存储名
+- 图片本地旋转、比例裁剪、缩放与位置调整，附件统一重命名，并保留图片编辑前的原图
 - macOS Apple Vision 本地一键抠图，异步串行处理、保留原图、透明 PNG 预览与失败重试
 - 移动历史、全字段物品编辑、归档、跨字段搜索与完整路径
 - 响应式登录、仪表盘、空间浏览、表单、详情和搜索页面
 - Swagger、数据库迁移、可重复 seed、结构化生产日志、健康检查
 - 单元测试、真实 PostgreSQL API 集成测试、桌面/窄屏 Playwright 验收
 
-详细设计见 [架构与业务规则](docs/ARCHITECTURE.md)。
+详细设计见 [架构与业务规则](docs/ARCHITECTURE.md)；启动、停止、功能更新、备份和 Apple Vision
+助手生命周期以 [运行与更新手册](docs/OPERATIONS.md) 为准；所有后续界面变更还应遵守
+[UI 设计原则](docs/UI_DESIGN.md)，在增加功能的同时保持简洁、美观和产品一致性。
 
 ## 目录
 
@@ -51,7 +55,7 @@ docker-compose.prod.yml 生产容器参考
 很小的 Swift 助手。下面的命令使用 Xcode 把 Swift 源码编译成 Mac 可执行文件：
 
 ```bash
-bash scripts/build-vision-helper.sh
+pnpm vision:build
 ```
 
 编译结果位于
@@ -74,7 +78,7 @@ macOS 的 Apple Vision 框架。
 首次使用先构建一次助手，之后启动方式与以前相同：
 
 ```bash
-bash scripts/build-vision-helper.sh
+pnpm vision:build
 pnpm dev
 ```
 
@@ -87,7 +91,7 @@ pnpm dev
 
 ```bash
 export ITEMBACK_VISION_TOKEN='替换为至少32字符的随机密钥'
-bash scripts/run-vision-helper.sh
+pnpm vision:serve
 ```
 
 这个命令会占用当前终端并持续运行。保持该终端开启，再在第二个终端按原来的方式启动物归：
@@ -100,14 +104,14 @@ pnpm prod:init
 
 ```bash
 # 第二个终端：停止物归的 Docker 服务，数据不会被删除
-docker compose --env-file .env.production -f docker-compose.prod.yml down
+pnpm prod:stop
 
 # 第一个终端：按 Ctrl+C 停止本地抠图助手
 ```
 
 只停止 Docker 不会自动停止助手；只停止助手也不会停止物归，但此时点击抠图会显示功能不可用，
-其他功能不受影响。下次启动时无需重新构建，分别重新运行 `scripts/run-vision-helper.sh` 和原有的
-Docker 启动命令即可。
+其他功能不受影响。下次启动时无需重新构建，分别重新运行 `pnpm vision:serve` 和
+`pnpm prod:start` 即可。
 
 生产配置使用 `VISION_HELPER_MODE=http`、
 `VISION_HELPER_URL=http://host.docker.internal:43118/remove-background`。助手只监听 `127.0.0.1`、
@@ -141,7 +145,7 @@ cp .env.example .env
 
 ## 生产 Docker 快速使用
 
-生产模式下，PostgreSQL、API 和 Web 都运行在 Docker 中。首次部署或代码、依赖、Docker 配置有变化时：
+生产模式下，PostgreSQL、API 和 Web 都运行在 Docker 中。首次部署时：
 
 ```bash
 pnpm prod:init
@@ -155,24 +159,36 @@ bash scripts/prod-init.sh
 
 `prod:init` 会创建/检查宿主机数据目录、确保数据库存在、构建镜像、执行 Prisma migrations 并启动服务。它可以重复执行，不会清空已有数据。工作区已关闭 pnpm 的“运行脚本前自动安装依赖”，因此该命令不会先在宿主机下载整套开发依赖；构建镜像时仍会在 Docker 内安装当前 Linux 架构所需依赖。
 
+已有生产数据并发布功能更新时，使用会先创建一致性备份的更新命令：
+
+```bash
+pnpm prod:update
+```
+
+完整的首次部署、日常启动、正常停止、更新后验证和各子系统生命周期见
+[运行与更新手册](docs/OPERATIONS.md)。
+
 日常启停的简单记忆：
 
 ```bash
 # 停止并删除容器/网络；不删除宿主机数据
-docker compose --env-file .env.production -f docker-compose.prod.yml down
+pnpm prod:stop
 
 # 代码没变：使用已有镜像快速启动
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d
+pnpm prod:start
 
-# 代码、依赖或 Docker 配置有变化：重新检查、构建并启动
+# 首次部署：检查、构建并启动
 pnpm prod:init
+
+# 已有生产环境发布功能更新：先备份，再构建、迁移并启动
+pnpm prod:update
 ```
 
 查看状态和日志：
 
 ```bash
-docker compose --env-file .env.production -f docker-compose.prod.yml ps
-docker compose --env-file .env.production -f docker-compose.prod.yml logs --tail=100
+pnpm prod:status
+pnpm prod:logs
 ```
 
 生产 Web 默认绑定宿主机 80 端口，因此网址不再需要端口号。Mac 会通过 mDNS 自动发布
@@ -243,6 +259,7 @@ Web 反向代理允许最大 100 MB 的 multipart 请求，API 仍按 `MAX_FILE_
 | 命令                    | 作用                                                      |
 | ----------------------- | --------------------------------------------------------- |
 | `pnpm dev`              | 启动 API 与 Web 开发服务器                                |
+| `pnpm docs:check`       | 核对运行文档与脚本、Compose、环境变量和 Vision 生命周期   |
 | `pnpm lint`             | 检查全部 TypeScript 源码与测试                            |
 | `pnpm test`             | 运行纯单元测试                                            |
 | `pnpm build`            | 生成前后端生产构建                                        |
@@ -253,8 +270,15 @@ Web 反向代理允许最大 100 MB 的 multipart 请求，API 仍按 `MAX_FILE_
 | `pnpm db:seed`          | 可重复写入示例数据和初始化账号                            |
 | `pnpm db:reset`         | **删除当前数据库全部数据**，重放迁移与 seed               |
 | `pnpm prod:init`        | 检查宿主机数据目录、构建并启动生产 Docker 服务            |
+| `pnpm prod:start`       | 使用已有镜像启动生产 Docker 服务                          |
+| `pnpm prod:stop`        | 停止生产容器和网络，保留宿主机数据                        |
+| `pnpm prod:update`      | 先成对备份生产数据，再构建、迁移并启动                    |
+| `pnpm prod:status`      | 查看生产容器状态                                          |
+| `pnpm prod:logs`        | 查看生产容器最近 100 行日志                               |
 | `pnpm prod:backup`      | 成对备份生产数据库和附件                                  |
 | `pnpm prod:reset`       | 确认并备份后，重置生产数据库和全部附件                    |
+| `pnpm vision:build`     | 构建 macOS Apple Vision Swift 助手                        |
+| `pnpm vision:serve`     | 以前台方式启动生产 Apple Vision 助手                      |
 
 首次运行浏览器测试前需安装 Chromium：
 

@@ -1,20 +1,19 @@
 # 宿主机数据、初始化、备份与重置
 
-生产 Compose 使用宿主机 bind mount，不再把正式数据只放在 Docker Desktop 的内部 volume 中。当前 Mac 的数据目录由 `.env.production` 的 `ITEMBACK_DATA_DIR` 决定：
+生产 Compose 使用宿主机 bind mount，不再把正式数据只放在 Docker Desktop 的内部 volume 中。实际数据目录由 `.env.production` 的 `ITEMBACK_DATA_DIR` 决定，例如：
 
 ```text
-/Users/atikwang/Workspace/ItemBack/data/prod/
+/srv/itemback-data/
 ├── postgres/  PostgreSQL 物理数据
 └── storage/   附件文件
 ```
 
 删除或重建容器不会删除这里的数据；即使卸载 Docker Desktop，目录仍保留。但本机磁盘损坏、误删目录仍会造成丢失，因此必须保留数据库逻辑备份和附件备份。
 
-## 初始化或正常启动
+## 首次初始化
 
 ```bash
-cd /Users/atikwang/Workspace/ItemBack
-bash scripts/prod-init.sh
+pnpm prod:init
 ```
 
 脚本创建数据目录、构建容器、初始化 PostgreSQL、执行 Prisma migrations 并启动服务。已有数据时不会清空。
@@ -22,7 +21,7 @@ bash scripts/prod-init.sh
 ## 创建一致性备份
 
 ```bash
-bash scripts/prod-backup.sh
+pnpm prod:backup
 ```
 
 备份默认写入 `backups/manual-时间/`，包含：
@@ -40,10 +39,10 @@ SHA256SUMS
 交互式执行：
 
 ```bash
-bash scripts/prod-reset.sh
+pnpm prod:reset
 ```
 
-自动化执行：
+确实需要在自动化环境中跳过交互确认时，可直接调用底层脚本：
 
 ```bash
 bash scripts/prod-reset.sh --yes
@@ -53,7 +52,9 @@ bash scripts/prod-reset.sh --yes
 
 ## 禁止事项
 
-- 不要手工编辑 `data/prod/postgres/` 中的文件。
+- 不要手工编辑 `ITEMBACK_DATA_DIR/postgres/` 中的文件。
 - 不要只备份 PostgreSQL 或只备份附件；二者必须成对保存。
 - 不要把 `data/`、`backups/` 或 `.env.production` 提交到 Git。
-- `docker compose down` 不会删除 bind mount 数据，但仍不要随意删除 `data/prod/`。
+- `docker compose down` 不会删除 bind mount 数据，但仍不要随意删除 `ITEMBACK_DATA_DIR`。
+
+日常启动、正常停止和功能更新的完整顺序见 [`OPERATIONS.md`](OPERATIONS.md)。

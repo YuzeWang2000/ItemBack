@@ -116,6 +116,20 @@ export class AttachmentsService {
     };
   }
 
+  async rename(id: string, filename: string) {
+    const attachment = await this.prisma.attachment.findFirst({
+      where: { id, item: { nodeType: NodeType.ITEM, archivedAt: null } },
+      select: { id: true },
+    });
+    if (!attachment)
+      throw new NotFoundException({ code: 'ATTACHMENT_NOT_FOUND', message: '附件不存在' });
+    const updated = await this.prisma.attachment.update({
+      where: { id },
+      data: { originalFilename: normalizeOriginalFilename(filename) },
+    });
+    return this.present(updated);
+  }
+
   async remove(id: string) {
     const attachment = await this.prisma.attachment.findUnique({ where: { id } });
     if (!attachment)

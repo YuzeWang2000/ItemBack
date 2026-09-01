@@ -13,8 +13,10 @@ import {
   Box,
   CalendarDays,
   Camera,
+  Crop,
   Download,
   Edit3,
+  Ellipsis,
   File,
   FileImage,
   FileText,
@@ -22,6 +24,7 @@ import {
   MapPin,
   PackageOpen,
   Paperclip,
+  PencilLine,
   Plus,
   ShieldCheck,
   Star,
@@ -33,6 +36,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api, ApiError, contentUrl } from '../api';
+import { ImageEditorDialog } from '../components/ImageEditorDialog';
 import { getExpiryState, ItemCard, itemStatusLabels as statusLabels } from '../components/ItemCard';
 import { Empty, formatDate, formatMoney, Loading, Notice, PageHeader } from '../components/ui';
 
@@ -299,6 +303,9 @@ function AttachmentPanel({
   const [category, setCategory] = useState<AttachmentCategory>('PHOTO');
   const [description, setDescription] = useState('');
   const [dragging, setDragging] = useState(false);
+  const [editingImage, setEditingImage] = useState<AttachmentRecord | null>(null);
+  const [renaming, setRenaming] = useState<AttachmentRecord | null>(null);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ kind: 'error' | 'success'; text: string } | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const cameraInput = useRef<HTMLInputElement>(null);
@@ -322,6 +329,15 @@ function AttachmentPanel({
       void client.invalidateQueries({ queryKey: ['attachments', itemId] });
     }
   }, [client, completedResults, itemId]);
+  useEffect(() => {
+    const closeMenu = (event: PointerEvent) => {
+      if (!(event.target instanceof Element) || !event.target.closest('.attachment-actions-menu')) {
+        setOpenMenuId(null);
+      }
+    };
+    document.addEventListener('pointerdown', closeMenu);
+    return () => document.removeEventListener('pointerdown', closeMenu);
+  }, []);
   const refresh = () =>
     Promise.all([
       client.invalidateQueries({ queryKey: ['attachments', itemId] }),
@@ -441,216 +457,368 @@ function AttachmentPanel({
     ),
   );
   return (
-    <section className="panel attachment-panel">
-      <div className="panel-heading">
-        <div>
-          <p className="eyebrow">数字资料</p>
-          <h2>图片与附件</h2>
-        </div>
-        <Paperclip />
-      </div>
-      <form onSubmit={submit}>
-        {message && <Notice kind={message.kind}>{message.text}</Notice>}
-        <div className="quick-camera-row">
-          <label
-            className={`button secondary ${upload.isPending ? 'is-disabled' : ''}`}
-            aria-disabled={upload.isPending}
-          >
-            <Camera size={17} />
-            {upload.isPending ? '正在上传…' : '拍照添加'}
-            <input
-              ref={cameraInput}
-              hidden
-              type="file"
-              accept="image/*"
-              capture="environment"
-              disabled={upload.isPending}
-              onChange={(event) => void capture(event.target.files)}
-            />
-          </label>
-          <small>拍照确认后会立即上传；失败时会保留到待上传列表。</small>
-        </div>
-        <div
-          className={`drop-zone ${dragging ? 'dragging' : ''}`}
-          onDragEnter={() => setDragging(true)}
-          onDragLeave={() => setDragging(false)}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={drop}
-          onClick={() => input.current?.click()}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') input.current?.click();
-          }}
-        >
-          <UploadCloud />
-          <strong>拖入文件，或点击选择</strong>
-          <p>支持图片、PDF、文档与压缩包；单个文件上限由服务端配置。</p>
-          <input ref={input} type="file" multiple hidden onChange={(e) => accept(e.target.files)} />
-        </div>
-        {files.length > 0 && (
-          <div className="upload-queue">
-            {files.map((file, index) => (
-              <span key={`${file.name}-${index}`}>
-                {file.name}
-                <button
-                  type="button"
-                  onClick={() => setFiles(files.filter((_, i) => i !== index))}
-                  aria-label={`移除 ${file.name}`}
-                >
-                  <X size={13} />
-                </button>
-              </span>
-            ))}
+    <>
+      <section className="panel attachment-panel">
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">数字资料</p>
+            <h2>图片与附件</h2>
           </div>
-        )}
-        <div className="upload-controls">
-          <label>
-            <span>附件分类</span>
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value as AttachmentCategory)}
-            >
-              {Object.entries(categoryLabels).map(([value, label]) => (
-                <option value={value} key={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>说明（可选）</span>
-            <input
-              maxLength={1000}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="例如：2026 年购买发票"
-            />
-          </label>
-          <button className="button secondary" disabled={!files.length || upload.isPending}>
-            {upload.isPending ? '正在上传…' : `上传 ${files.length || ''} 个文件`}
-          </button>
+          <Paperclip />
         </div>
-      </form>
-      {loading ? (
-        <Loading label="正在读取附件…" />
-      ) : items.length ? (
-        <div className="attachments-grid">
-          {items.map((file) =>
-            (() => {
-              const backgroundJob = jobsBySource.get(file.id);
-              const processing =
-                backgroundJob && ['QUEUED', 'PROCESSING'].includes(backgroundJob.status);
-              return (
-                <article
-                  key={file.id}
-                  className={file.id === coverAttachmentId ? 'is-cover' : undefined}
-                >
-                  {file.mimeType.startsWith('image/') && file.mimeType !== 'image/svg+xml' ? (
-                    <a
-                      className="attachment-preview"
-                      href={contentUrl(file.id)}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      <img
-                        src={contentUrl(file.id)}
-                        alt={file.description || file.originalFilename}
-                      />
-                    </a>
-                  ) : (
-                    <span className="file-glyph">
-                      {file.mimeType === 'application/pdf' ? (
-                        <FileText />
-                      ) : file.category === 'PHOTO' ? (
-                        <FileImage />
-                      ) : (
-                        <File />
-                      )}
-                    </span>
-                  )}
-                  <div className="file-info">
-                    <strong title={file.originalFilename}>{file.originalFilename}</strong>
-                    <p>
-                      {categoryLabels[file.category]} · {formatBytes(file.size)}
-                      {file.id === coverAttachmentId && <span className="cover-label">预览图</span>}
-                    </p>
-                    {file.description && <small>{file.description}</small>}
-                    {backgroundJob && (
-                      <small
-                        className={`background-job-status ${backgroundJob.status.toLowerCase()}`}
+        <form onSubmit={submit}>
+          {message && <Notice kind={message.kind}>{message.text}</Notice>}
+          <div className="quick-camera-row">
+            <label
+              className={`button secondary ${upload.isPending ? 'is-disabled' : ''}`}
+              aria-disabled={upload.isPending}
+            >
+              <Camera size={17} />
+              {upload.isPending ? '正在上传…' : '拍照添加'}
+              <input
+                ref={cameraInput}
+                hidden
+                type="file"
+                accept="image/*"
+                capture="environment"
+                disabled={upload.isPending}
+                onChange={(event) => void capture(event.target.files)}
+              />
+            </label>
+            <small>拍照确认后会立即上传；失败时会保留到待上传列表。</small>
+          </div>
+          <div
+            className={`drop-zone ${dragging ? 'dragging' : ''}`}
+            onDragEnter={() => setDragging(true)}
+            onDragLeave={() => setDragging(false)}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={drop}
+            onClick={() => input.current?.click()}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') input.current?.click();
+            }}
+          >
+            <UploadCloud />
+            <strong>拖入文件，或点击选择</strong>
+            <p>支持图片、PDF、文档与压缩包；单个文件上限由服务端配置。</p>
+            <input
+              ref={input}
+              type="file"
+              multiple
+              hidden
+              onChange={(e) => accept(e.target.files)}
+            />
+          </div>
+          {files.length > 0 && (
+            <div className="upload-queue">
+              {files.map((file, index) => (
+                <span key={`${file.name}-${index}`}>
+                  {file.name}
+                  <button
+                    type="button"
+                    onClick={() => setFiles(files.filter((_, i) => i !== index))}
+                    aria-label={`移除 ${file.name}`}
+                  >
+                    <X size={13} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          <div className="upload-controls">
+            <label>
+              <span>附件分类</span>
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value as AttachmentCategory)}
+              >
+                {Object.entries(categoryLabels).map(([value, label]) => (
+                  <option value={value} key={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>说明（可选）</span>
+              <input
+                maxLength={1000}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="例如：2026 年购买发票"
+              />
+            </label>
+            <button className="button secondary" disabled={!files.length || upload.isPending}>
+              {upload.isPending ? '正在上传…' : `上传 ${files.length || ''} 个文件`}
+            </button>
+          </div>
+        </form>
+        {loading ? (
+          <Loading label="正在读取附件…" />
+        ) : items.length ? (
+          <div className="attachments-grid">
+            {items.map((file) =>
+              (() => {
+                const backgroundJob = jobsBySource.get(file.id);
+                const processing =
+                  backgroundJob && ['QUEUED', 'PROCESSING'].includes(backgroundJob.status);
+                return (
+                  <article
+                    key={file.id}
+                    className={file.id === coverAttachmentId ? 'is-cover' : undefined}
+                  >
+                    {file.mimeType.startsWith('image/') && file.mimeType !== 'image/svg+xml' ? (
+                      <a
+                        className="attachment-preview"
+                        href={contentUrl(file.id)}
+                        target="_blank"
+                        rel="noreferrer"
                       >
-                        {processing
-                          ? '正在 Mac 本机移除背景…'
-                          : backgroundJob.status === 'SUCCEEDED'
-                            ? '无背景版本已生成'
-                            : backgroundJob.errorMessage || '本地抠图未完成'}
-                      </small>
+                        <img
+                          src={contentUrl(file.id)}
+                          alt={file.description || file.originalFilename}
+                        />
+                      </a>
+                    ) : (
+                      <span className="file-glyph">
+                        {file.mimeType === 'application/pdf' ? (
+                          <FileText />
+                        ) : file.category === 'PHOTO' ? (
+                          <FileImage />
+                        ) : (
+                          <File />
+                        )}
+                      </span>
                     )}
-                  </div>
-                  <div className="file-actions">
-                    {file.mimeType.startsWith('image/') &&
-                      file.mimeType !== 'image/svg+xml' &&
-                      !resultIds.has(file.id) && (
+                    <div className="file-info">
+                      <strong title={file.originalFilename}>{file.originalFilename}</strong>
+                      <p>
+                        {categoryLabels[file.category]} · {formatBytes(file.size)}
+                        {file.id === coverAttachmentId && (
+                          <span className="cover-label">预览图</span>
+                        )}
+                      </p>
+                      {file.description && <small>{file.description}</small>}
+                      {backgroundJob && (
+                        <small
+                          className={`background-job-status ${backgroundJob.status.toLowerCase()}`}
+                        >
+                          {processing
+                            ? '正在 Mac 本机移除背景…'
+                            : backgroundJob.status === 'SUCCEEDED'
+                              ? '无背景版本已生成'
+                              : backgroundJob.errorMessage || '本地抠图未完成'}
+                        </small>
+                      )}
+                    </div>
+                    <div className="file-actions">
+                      <div className="attachment-actions-menu">
                         <button
                           className="icon-button"
-                          onClick={() => void requestBackgroundRemoval(file)}
-                          disabled={Boolean(processing) || removeBackground.isPending}
-                          aria-label={`${backgroundJob && ['FAILED', 'UNAVAILABLE'].includes(backgroundJob.status) ? '重试' : ''}移除 ${file.originalFilename} 的背景`}
-                          title={
-                            processing
-                              ? '正在本机处理'
-                              : backgroundJob &&
-                                  ['FAILED', 'UNAVAILABLE'].includes(backgroundJob.status)
-                                ? '重试本地抠图'
-                                : '一键移除背景'
+                          aria-label={`管理 ${file.originalFilename}`}
+                          aria-expanded={openMenuId === file.id}
+                          title="更多操作"
+                          type="button"
+                          onClick={() =>
+                            setOpenMenuId((current) => (current === file.id ? null : file.id))
                           }
                         >
-                          <WandSparkles size={16} />
+                          <Ellipsis size={17} />
                         </button>
-                      )}
-                    {file.mimeType.startsWith('image/') && file.mimeType !== 'image/svg+xml' && (
-                      <button
-                        className={`icon-button ${file.id === coverAttachmentId ? 'is-active' : ''}`}
-                        onClick={() => chooseCover(file)}
-                        disabled={file.id === coverAttachmentId || cover.isPending}
-                        aria-label={
-                          file.id === coverAttachmentId
-                            ? `${file.originalFilename} 是当前预览图`
-                            : `将 ${file.originalFilename} 设为预览图`
-                        }
-                        title={file.id === coverAttachmentId ? '当前预览图' : '设为预览图'}
-                      >
-                        <Star
-                          size={16}
-                          fill={file.id === coverAttachmentId ? 'currentColor' : 'none'}
-                        />
-                      </button>
-                    )}
-                    <a
-                      className="icon-button"
-                      href={contentUrl(file.id, true)}
-                      aria-label={`下载 ${file.originalFilename}`}
-                    >
-                      <Download size={16} />
-                    </a>
-                    <button
-                      className="icon-button danger-text"
-                      onClick={() => remove(file)}
-                      aria-label={`删除 ${file.originalFilename}`}
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                </article>
-              );
-            })(),
-          )}
-        </div>
-      ) : (
-        <Empty title="还没有数字资料" detail="把照片、说明书、发票和保修资料留在物品身边。" />
+                        {openMenuId === file.id && (
+                          <div className="attachment-action-list">
+                            {file.mimeType.startsWith('image/') &&
+                              file.mimeType !== 'image/svg+xml' && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenMenuId(null);
+                                    setEditingImage(file);
+                                  }}
+                                >
+                                  <Crop size={15} />
+                                  旋转与裁剪
+                                </button>
+                              )}
+                            {file.mimeType.startsWith('image/') &&
+                              file.mimeType !== 'image/svg+xml' &&
+                              !resultIds.has(file.id) && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenMenuId(null);
+                                    void requestBackgroundRemoval(file);
+                                  }}
+                                  disabled={Boolean(processing) || removeBackground.isPending}
+                                >
+                                  <WandSparkles size={15} />
+                                  {processing
+                                    ? '正在移除背景…'
+                                    : backgroundJob &&
+                                        ['FAILED', 'UNAVAILABLE'].includes(backgroundJob.status)
+                                      ? '重试移除背景'
+                                      : '移除背景'}
+                                </button>
+                              )}
+                            {file.mimeType.startsWith('image/') &&
+                              file.mimeType !== 'image/svg+xml' && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOpenMenuId(null);
+                                    void chooseCover(file);
+                                  }}
+                                  disabled={file.id === coverAttachmentId || cover.isPending}
+                                >
+                                  <Star
+                                    size={15}
+                                    fill={file.id === coverAttachmentId ? 'currentColor' : 'none'}
+                                  />
+                                  {file.id === coverAttachmentId ? '当前预览图' : '设为预览图'}
+                                </button>
+                              )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOpenMenuId(null);
+                                setRenaming(file);
+                              }}
+                            >
+                              <PencilLine size={15} />
+                              重命名
+                            </button>
+                            <a href={contentUrl(file.id, true)} onClick={() => setOpenMenuId(null)}>
+                              <Download size={15} />
+                              下载
+                            </a>
+                            <button
+                              className="danger-text"
+                              type="button"
+                              onClick={() => {
+                                setOpenMenuId(null);
+                                void remove(file);
+                              }}
+                            >
+                              <Trash2 size={15} />
+                              删除
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </article>
+                );
+              })(),
+            )}
+          </div>
+        ) : (
+          <Empty title="还没有数字资料" detail="把照片、说明书、发票和保修资料留在物品身边。" />
+        )}
+      </section>
+      {editingImage && (
+        <ImageEditorDialog
+          itemId={itemId}
+          file={editingImage}
+          isCover={editingImage.id === coverAttachmentId}
+          onClose={() => setEditingImage(null)}
+          onSaved={(attachment) => {
+            setEditingImage(null);
+            void refresh();
+            setMessage({
+              kind: 'success',
+              text: `已保存“${attachment.originalFilename}”，原图仍然保留。`,
+            });
+          }}
+        />
       )}
-    </section>
+      {renaming && (
+        <RenameAttachmentDialog
+          file={renaming}
+          onClose={() => setRenaming(null)}
+          onSaved={(attachment) => {
+            setRenaming(null);
+            void refresh();
+            setMessage({
+              kind: 'success',
+              text: `附件已重命名为“${attachment.originalFilename}”。`,
+            });
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function RenameAttachmentDialog({
+  file,
+  onClose,
+  onSaved,
+}: {
+  file: AttachmentRecord;
+  onClose(): void;
+  onSaved(file: AttachmentRecord): void;
+}) {
+  const [filename, setFilename] = useState(file.originalFilename);
+  const [error, setError] = useState('');
+  const rename = useMutation({
+    mutationFn: () =>
+      api<AttachmentRecord>(`/attachments/${file.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ filename }),
+      }),
+  });
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setError('');
+    try {
+      onSaved(await rename.mutateAsync());
+    } catch (reason) {
+      setError(reason instanceof ApiError ? reason.message : '重命名失败，请稍后重试');
+    }
+  };
+  return (
+    <div className="modal-backdrop" onMouseDown={onClose}>
+      <section
+        className="modal rename-attachment-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="rename-attachment-title"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <button className="icon-button modal-close" onClick={onClose} aria-label="关闭重命名">
+          <X />
+        </button>
+        <span className="modal-symbol">
+          <PencilLine />
+        </span>
+        <p className="eyebrow">附件管理</p>
+        <h2 id="rename-attachment-title">重命名附件</h2>
+        <p>只更改显示和下载名称，不会改变文件内容或格式。</p>
+        {error && <Notice>{error}</Notice>}
+        <form onSubmit={submit}>
+          <label className="field">
+            <span>文件名</span>
+            <input
+              autoFocus
+              required
+              maxLength={500}
+              value={filename}
+              onChange={(event) => setFilename(event.target.value)}
+            />
+          </label>
+          <div className="form-actions">
+            <button className="button ghost" type="button" onClick={onClose}>
+              取消
+            </button>
+            <button className="button primary" disabled={rename.isPending || !filename.trim()}>
+              {rename.isPending ? '正在保存…' : '保存名称'}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
   );
 }
 

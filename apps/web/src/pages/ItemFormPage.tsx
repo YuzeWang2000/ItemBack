@@ -4,7 +4,7 @@ import { ArrowLeft, Box, Camera, ImagePlus, PackageOpen, Plus, Tags, X } from 'l
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, ApiError } from '../api';
-import { Empty, Field, Loading, Notice, PageHeader } from '../components/ui';
+import { DateInput, Empty, Field, Loading, Notice, PageHeader } from '../components/ui';
 
 const statuses: Array<[ItemStatus, string]> = [
   ['ACTIVE', '使用中'],
@@ -230,7 +230,7 @@ export function ItemFormPage() {
                 maxLength={200}
                 value={form.brand}
                 onChange={(e) => set('brand', e.target.value)}
-                placeholder="例如：耐克"
+                placeholder="例如：爱马仕"
               />
             </Field>
             <Field label="品牌英文名（可选）">
@@ -238,7 +238,7 @@ export function ItemFormPage() {
                 maxLength={200}
                 value={form.brandEnglishName}
                 onChange={(e) => set('brandEnglishName', e.target.value)}
-                placeholder="例如：Nike"
+                placeholder="例如：Hermès"
               />
             </Field>
             <Field label="型号（可选）">
@@ -319,29 +319,25 @@ export function ItemFormPage() {
             </div>
           </div>
           <div className="form-grid three">
-            <Field label="入手日期">
-              <input
-                type="date"
-                value={form.acquiredDate}
-                onChange={(e) => set('acquiredDate', e.target.value)}
-              />
-            </Field>
-            <Field label="结束日期" hint="出售或处置后填写">
-              <input
-                type="date"
-                min={form.acquiredDate || undefined}
-                value={form.endDate}
-                onChange={(e) => set('endDate', e.target.value)}
-              />
-            </Field>
-            <Field label="有效期至（可选）" hint="适用于食品、药品、耗材等有保质期的物品">
-              <input
-                type="date"
-                min={form.acquiredDate || undefined}
-                value={form.expiryDate}
-                onChange={(e) => set('expiryDate', e.target.value)}
-              />
-            </Field>
+            <DateInput
+              label="入手日期"
+              value={form.acquiredDate}
+              onChange={(value) => set('acquiredDate', value)}
+            />
+            <DateInput
+              label="结束日期"
+              hint="出售或处置后填写"
+              min={form.acquiredDate || undefined}
+              value={form.endDate}
+              onChange={(value) => set('endDate', value)}
+            />
+            <DateInput
+              label="有效期至（可选）"
+              hint="适用于食品、药品、耗材等有保质期的物品"
+              min={form.acquiredDate || undefined}
+              value={form.expiryDate}
+              onChange={(value) => set('expiryDate', value)}
+            />
             <Field label="数量">
               <input
                 type="number"

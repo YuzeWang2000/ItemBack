@@ -16,4 +16,9 @@ describe('attachment filename normalization', () => {
     expect(normalizeOriginalFilename('../资料/发票.pdf')).toBe('发票.pdf');
     expect(normalizeOriginalFilename('C:\\fakepath\\照片.png')).toBe('照片.png');
   });
+
+  it('removes control characters and supplies a safe fallback', () => {
+    expect(normalizeOriginalFilename('保修\u0000卡.pdf')).toBe('保修卡.pdf');
+    expect(normalizeOriginalFilename('../\u0000')).toBe('未命名文件');
+  });
 });

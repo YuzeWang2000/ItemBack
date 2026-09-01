@@ -1,4 +1,26 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+
+async function expectDesignBaseline(page: Page) {
+  const result = await page.evaluate(() => {
+    const root = document.documentElement;
+    const overflow = root.scrollWidth - root.clientWidth;
+    const crowdedRegions = Array.from(
+      document.querySelectorAll('.page-header, .form-actions, .panel-heading'),
+    )
+      .filter((region) => {
+        const visiblePrimaryActions = Array.from(
+          region.querySelectorAll<HTMLElement>('.button.primary'),
+        ).filter((action) => action.getClientRects().length > 0);
+        return visiblePrimaryActions.length > 1;
+      })
+      .map((region) => region.className);
+
+    return { overflow, crowdedRegions };
+  });
+
+  expect(result.overflow, '页面不应产生横向溢出').toBeLessThanOrEqual(1);
+  expect(result.crowdedRegions, '同一区域不应出现多个主要操作').toEqual([]);
+}
 
 test('核心用户流：登录、创建、嵌套、成本、附件、移动与搜索', async ({ page }, testInfo) => {
   const suffix = testInfo.project.name.includes('mobile') ? '窄屏' : '桌面';
@@ -8,13 +30,16 @@ test('核心用户流：登录、创建、嵌套、成本、附件、移动与�
   const bookName = `验收书-${suffix}`;
 
   await page.goto('/login');
+  await expectDesignBaseline(page);
   await page.getByLabel('邮箱').fill('admin@itemback.test');
   await page.getByLabel('密码').fill('itemback-test-password');
   await page.getByRole('button', { name: /进入 ItemBack/ }).click();
   await expect(page).toHaveURL(/\/$/);
   await expect(page.getByRole('heading', { name: '你的物品，仍在时间里' })).toBeVisible();
+  await expectDesignBaseline(page);
 
   await page.goto('/spaces/new');
+  await expectDesignBaseline(page);
   await page.getByLabel('空间名称').fill(homeName);
   await page.getByRole('button', { name: '创建空间' }).click();
   await expect(page.getByRole('heading', { name: homeName, level: 1 })).toBeVisible();
@@ -27,25 +52,35 @@ test('核心用户流：登录、创建、嵌套、成本、附件、移动与�
   await page.goto(homeUrl);
 
   await page.getByRole('link', { name: /记录物品/ }).click();
+  await expectDesignBaseline(page);
   await page.getByLabel('物品名称').fill(bagName);
   await page.getByRole('button', { name: /这是一个普通物品/ }).click();
   const acquired = new Date();
   acquired.setUTCDate(acquired.getUTCDate() - 59);
-  await page.getByLabel('入手日期').fill(acquired.toISOString().slice(0, 10));
+  await page.getByLabel('入手日期', { exact: true }).fill(acquired.toISOString().slice(0, 10));
   await page.getByLabel('记录价值').fill('600');
   await page.getByLabel('币种').fill('CNY');
-  await page.getByLabel('品牌中文名或常用名（可选）').fill('耐克');
-  await page.getByLabel('品牌英文名（可选）').fill('Nike');
+  await page.getByLabel('品牌中文名或常用名（可选）').fill('爱马仕');
+  await page.getByLabel('品牌英文名（可选）').fill('Hermès');
   await page.getByRole('button', { name: '加入档案' }).click();
   await expect(page.getByRole('heading', { name: bagName })).toBeVisible();
   await expect(page.getByText(/10\.0000.*天/)).toBeVisible();
-  await expect(page.getByText('Nike', { exact: true })).toBeVisible();
+  await expect(page.getByText('Hermès', { exact: true })).toBeVisible();
 
   await page.getByRole('link', { name: /放入物品/ }).click();
   await page.getByLabel('物品名称').fill(bookName);
+  const acquiredDateField = page.getByLabel('入手日期', { exact: true }).locator('..');
+  await acquiredDateField.getByText('按年份快速定位').click();
+  await acquiredDateField.getByLabel('入手日期年份').fill('2012');
+  await acquiredDateField.getByLabel('入手日期月份').selectOption('03');
+  await acquiredDateField.getByLabel('入手日期日期').selectOption('04');
+  await acquiredDateField.getByRole('button', { name: '使用这个日期' }).click();
+  await expect(page.getByLabel('入手日期', { exact: true })).toHaveValue('2012-03-04');
   await page.getByRole('button', { name: '加入档案' }).click();
   await expect(page.getByRole('heading', { name: bookName })).toBeVisible();
   await expect(page.getByText('未记录价值', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('2012年3月4日', { exact: true })).toBeVisible();
+  await expectDesignBaseline(page);
 
   const png = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
@@ -65,11 +100,11 @@ test('核心用户流：登录、创建、嵌套、成本、附件、移动与�
     'background-color',
     'rgb(255, 255, 255)',
   );
-  await page.getByRole('button', { name: '移除 camera-photo.png 的背景' }).click();
+  await page.getByLabel('管理 camera-photo.png').click();
+  await page.getByRole('button', { name: '移除背景', exact: true }).click();
   await expect(page.getByText('当前部署未配置 macOS 本地系统抠图助手').first()).toBeVisible();
-  await expect(
-    page.getByRole('button', { name: '重试移除 camera-photo.png 的背景' }),
-  ).toBeVisible();
+  await page.getByLabel('管理 camera-photo.png').click();
+  await expect(page.getByRole('button', { name: '重试移除背景' })).toBeVisible();
 
   await page.locator('.drop-zone input[type=file]').setInputFiles([
     { name: 'book-front.png', mimeType: 'image/png', buffer: png },
@@ -83,9 +118,31 @@ test('核心用户流：登录、创建、嵌套、成本、附件、移动与�
   await expect(page.locator('.attachment-preview img')).toHaveCount(3);
   await expect(page.locator('.attachment-preview img').first()).toHaveCSS('object-fit', 'contain');
   const backPhoto = page.locator('.attachments-grid article').filter({ hasText: 'book-back.png' });
-  await backPhoto.getByRole('button', { name: '将 book-back.png 设为预览图' }).click();
+  await backPhoto.getByLabel('管理 book-back.png').click();
+  await backPhoto.getByRole('button', { name: '设为预览图' }).click();
   await expect(page.getByText('已将“book-back.png”设为预览图。')).toBeVisible();
-  await expect(backPhoto.getByRole('button', { name: 'book-back.png 是当前预览图' })).toBeVisible();
+  await backPhoto.getByLabel('管理 book-back.png').click();
+  await expect(backPhoto.getByRole('button', { name: '当前预览图' })).toBeVisible();
+  await backPhoto.getByLabel('管理 book-back.png').click();
+
+  const manual = page.locator('.attachments-grid article').filter({ hasText: 'manual.pdf' });
+  await manual.getByLabel('管理 manual.pdf').click();
+  await manual.getByRole('button', { name: '重命名' }).click();
+  await page.getByLabel('文件名').fill('维护手册.pdf');
+  await page.getByRole('button', { name: '保存名称' }).click();
+  await expect(page.getByText('附件已重命名为“维护手册.pdf”。')).toBeVisible();
+  await expect(page.getByText('维护手册.pdf', { exact: true })).toBeVisible();
+
+  const frontPhoto = page
+    .locator('.attachments-grid article')
+    .filter({ hasText: 'book-front.png' });
+  await frontPhoto.getByLabel('管理 book-front.png').click();
+  await frontPhoto.getByRole('button', { name: '旋转与裁剪' }).click();
+  await page.getByRole('button', { name: '向右旋转' }).click();
+  await page.getByRole('button', { name: '方形' }).click();
+  await page.getByRole('button', { name: '保存新图片' }).click();
+  await expect(page.getByText('book-front-已编辑.png', { exact: true })).toBeVisible();
+  await expect(page.locator('.attachments-grid article')).toHaveCount(6);
 
   await page.getByRole('button', { name: '移动' }).click();
   await page.getByLabel('新位置').selectOption({ label: officeName });
@@ -98,6 +155,7 @@ test('核心用户流：登录、创建、嵌套、成本、附件、移动与�
   await page.goto(`/search?q=${encodeURIComponent(bookName)}`);
   await expect(page.getByText('找到 1 件相关物品')).toBeVisible();
   await expect(page.getByText(officeName, { exact: true })).toBeVisible();
+  await expectDesignBaseline(page);
   await page.getByRole('link', { name: new RegExp(bookName) }).click();
   await expect(page.getByRole('heading', { name: bookName })).toBeVisible();
 

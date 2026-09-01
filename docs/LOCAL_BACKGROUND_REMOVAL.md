@@ -11,6 +11,9 @@ Swift 助手只接收图片字节并返回 PNG 字节，不接收输入/输出�
 容器时，助手作为 Mac 宿主机 loopback 服务运行，使用独立共享密钥鉴权。图片只在本机进程
 间传递。
 
+开发与生产模式下的构建、启动、停止、更新和状态确认步骤以
+[`OPERATIONS.md`](OPERATIONS.md) 为准；本文件只描述实现与安全边界。
+
 ## 状态与附件关系
 
 `BackgroundRemovalJob` 保存 `QUEUED / PROCESSING / SUCCEEDED / FAILED / UNAVAILABLE` 状态。

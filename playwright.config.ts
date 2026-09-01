@@ -13,7 +13,10 @@ export default defineConfig({
   },
   projects: [
     { name: 'desktop-chromium', use: { ...devices['Desktop Chrome'] } },
-    { name: 'mobile-chromium', use: { ...devices['Pixel 7'] } },
+    {
+      name: 'mobile-chromium',
+      use: { ...devices['Pixel 7'], viewport: { width: 320, height: 800 } },
+    },
   ],
   webServer: process.env.ITEMBACK_MANAGED_SERVERS
     ? undefined

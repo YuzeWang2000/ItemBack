@@ -25,6 +25,7 @@ const makeNode = (data: Partial<Node>): Node => ({
   currency: null,
   quantity: 1,
   brand: null,
+  brandEnglishName: null,
   model: null,
   serialNumber: null,
   createdAt: new Date(),

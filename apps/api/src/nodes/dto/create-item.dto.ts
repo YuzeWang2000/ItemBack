@@ -86,6 +86,12 @@ export class CreateItemDto {
   @MaxLength(200)
   brand?: string;
 
+  @ApiPropertyOptional({ example: 'Nike', description: '品牌英文名' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  brandEnglishName?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()

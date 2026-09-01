@@ -27,6 +27,7 @@ interface FormState {
   currency: string;
   quantity: string;
   brand: string;
+  brandEnglishName: string;
   model: string;
   serialNumber: string;
   tags: string[];
@@ -44,6 +45,7 @@ const emptyForm: FormState = {
   currency: 'CNY',
   quantity: '1',
   brand: '',
+  brandEnglishName: '',
   model: '',
   serialNumber: '',
   tags: [],
@@ -86,6 +88,7 @@ export function ItemFormPage() {
         currency: current.data.currency ?? 'CNY',
         quantity: String(current.data.quantity),
         brand: current.data.brand ?? '',
+        brandEnglishName: current.data.brandEnglishName ?? '',
         model: current.data.model ?? '',
         serialNumber: current.data.serialNumber ?? '',
         tags: current.data.tags.map((tag) => tag.name),
@@ -142,6 +145,7 @@ export function ItemFormPage() {
       currency: form.valueAmount ? form.currency.toUpperCase() : editing ? null : undefined,
       quantity: Number(form.quantity),
       brand: form.brand || (editing ? null : undefined),
+      brandEnglishName: form.brandEnglishName || (editing ? null : undefined),
       model: form.model || (editing ? null : undefined),
       serialNumber: form.serialNumber || (editing ? null : undefined),
       tags: form.tags,
@@ -221,12 +225,20 @@ export function ItemFormPage() {
                 </select>
               </Field>
             )}
-            <Field label="品牌（可选）">
+            <Field label="品牌中文名或常用名（可选）">
               <input
                 maxLength={200}
                 value={form.brand}
                 onChange={(e) => set('brand', e.target.value)}
-                placeholder="品牌"
+                placeholder="例如：耐克"
+              />
+            </Field>
+            <Field label="品牌英文名（可选）">
+              <input
+                maxLength={200}
+                value={form.brandEnglishName}
+                onChange={(e) => set('brandEnglishName', e.target.value)}
+                placeholder="例如：Nike"
               />
             </Field>
             <Field label="型号（可选）">

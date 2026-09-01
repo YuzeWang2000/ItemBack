@@ -1,0 +1,1 @@
+ALTER TABLE "Node" ADD COLUMN "brandEnglishName" VARCHAR(200);

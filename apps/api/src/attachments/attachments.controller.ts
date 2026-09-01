@@ -19,6 +19,7 @@ import { createReadStream } from 'node:fs';
 import { memoryStorage } from 'multer';
 import { AttachmentsService } from './attachments.service';
 import { UploadAttachmentDto } from './upload-attachment.dto';
+import { BackgroundRemovalService } from './background-removal.service';
 
 const maxFileSize = Math.max(1, Number(process.env.MAX_FILE_SIZE_MB ?? 25)) * 1024 * 1024;
 const inlineTypes = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif']);
@@ -27,7 +28,10 @@ const inlineTypes = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp
 @ApiCookieAuth()
 @Controller()
 export class AttachmentsController {
-  constructor(private readonly attachments: AttachmentsService) {}
+  constructor(
+    private readonly attachments: AttachmentsService,
+    private readonly backgroundRemoval: BackgroundRemovalService,
+  ) {}
 
   @Post('items/:itemId/attachments')
   @ApiConsumes('multipart/form-data')
@@ -82,5 +86,20 @@ export class AttachmentsController {
   @Delete('attachments/:id')
   remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.attachments.remove(id);
+  }
+
+  @Post('attachments/:id/remove-background')
+  removeBackground(@Param('id', ParseUUIDPipe) id: string) {
+    return this.backgroundRemoval.request(id);
+  }
+
+  @Get('background-removals/:id')
+  backgroundRemovalStatus(@Param('id', ParseUUIDPipe) id: string) {
+    return this.backgroundRemoval.get(id);
+  }
+
+  @Get('items/:itemId/background-removals')
+  backgroundRemovals(@Param('itemId', ParseUUIDPipe) itemId: string) {
+    return this.backgroundRemoval.list(itemId);
   }
 }

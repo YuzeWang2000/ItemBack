@@ -38,6 +38,7 @@ export interface NodeRecord {
   currency: string | null;
   quantity: number;
   brand: string | null;
+  brandEnglishName: string | null;
   model: string | null;
   serialNumber: string | null;
   createdAt: string;
@@ -68,6 +69,31 @@ export interface AttachmentRecord {
   description: string | null;
   sortOrder: number;
   createdAt: string;
+}
+
+export const backgroundRemovalStatuses = [
+  'QUEUED',
+  'PROCESSING',
+  'SUCCEEDED',
+  'FAILED',
+  'UNAVAILABLE',
+] as const;
+export type BackgroundRemovalStatus = (typeof backgroundRemovalStatuses)[number];
+
+export interface BackgroundRemovalJobRecord {
+  id: string;
+  itemId: string;
+  sourceAttachmentId: string;
+  resultAttachmentId: string | null;
+  algorithmVersion: string;
+  status: BackgroundRemovalStatus;
+  errorCode: string | null;
+  errorMessage: string | null;
+  attemptCount: number;
+  createdAt: string;
+  updatedAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
 }
 
 export interface MovementRecord {

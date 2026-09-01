@@ -228,6 +228,9 @@ export class NodesService {
         : {}),
       ...(dto.quantity !== undefined ? { quantity: dto.quantity } : {}),
       ...(dto.brand !== undefined ? { brand: clean(dto.brand) ?? null } : {}),
+      ...(dto.brandEnglishName !== undefined
+        ? { brandEnglishName: clean(dto.brandEnglishName) ?? null }
+        : {}),
       ...(dto.model !== undefined ? { model: clean(dto.model) ?? null } : {}),
       ...(dto.serialNumber !== undefined ? { serialNumber: clean(dto.serialNumber) ?? null } : {}),
     };
@@ -317,7 +320,7 @@ export class NodesService {
       nodeType: NodeType.ITEM,
       archivedAt: null,
       OR: [
-        ...['name', 'brand', 'model', 'serialNumber', 'description'].map(
+        ...['name', 'brand', 'brandEnglishName', 'model', 'serialNumber', 'description'].map(
           (field): Prisma.NodeWhereInput => ({
             [field]: { contains: query, mode: 'insensitive' },
           }),
@@ -377,6 +380,7 @@ export class NodesService {
       currency: clean(dto.currency)?.toUpperCase(),
       quantity: dto.quantity ?? 1,
       brand: clean(dto.brand),
+      brandEnglishName: clean(dto.brandEnglishName),
       model: clean(dto.model),
       serialNumber: clean(dto.serialNumber),
     };

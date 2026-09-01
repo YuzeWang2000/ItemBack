@@ -1,6 +1,7 @@
 import type {
   AttachmentCategory,
   AttachmentRecord,
+  BackgroundRemovalJobRecord,
   MovementRecord,
   NodeRecord,
 } from '@itemback/contracts';
@@ -26,9 +27,10 @@ import {
   Star,
   Trash2,
   UploadCloud,
+  WandSparkles,
   X,
 } from 'lucide-react';
-import { useMemo, useRef, useState, type DragEvent, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { api, ApiError, contentUrl } from '../api';
 import { getExpiryState, ItemCard, itemStatusLabels as statusLabels } from '../components/ItemCard';
@@ -192,7 +194,8 @@ export function ItemDetailPage() {
                 label="有效期至"
                 value={item.expiryDate ? formatDate(item.expiryDate) : '无有效期'}
               />
-              <Fact label="品牌" value={item.brand || '未记录'} />
+              <Fact label="品牌中文名或常用名" value={item.brand || '未记录'} />
+              <Fact label="品牌英文名" value={item.brandEnglishName || '未记录'} />
               <Fact label="型号" value={item.model || '未记录'} />
               <Fact label="序列号" value={item.serialNumber || '未记录'} />
               <Fact label="档案建立" value={formatDate(item.createdAt)} />
@@ -300,6 +303,25 @@ function AttachmentPanel({
   const input = useRef<HTMLInputElement>(null);
   const cameraInput = useRef<HTMLInputElement>(null);
   const client = useQueryClient();
+  const backgroundJobs = useQuery({
+    queryKey: ['background-removals', itemId],
+    queryFn: () => api<BackgroundRemovalJobRecord[]>(`/items/${itemId}/background-removals`),
+    refetchInterval: (query) =>
+      (query.state.data as BackgroundRemovalJobRecord[] | undefined)?.some((job) =>
+        ['QUEUED', 'PROCESSING'].includes(job.status),
+      )
+        ? 1200
+        : false,
+  });
+  const completedResults = (backgroundJobs.data ?? [])
+    .map((job) => job.resultAttachmentId)
+    .filter(Boolean)
+    .join(',');
+  useEffect(() => {
+    if (completedResults) {
+      void client.invalidateQueries({ queryKey: ['attachments', itemId] });
+    }
+  }, [client, completedResults, itemId]);
   const refresh = () =>
     Promise.all([
       client.invalidateQueries({ queryKey: ['attachments', itemId] }),
@@ -309,6 +331,7 @@ function AttachmentPanel({
       client.invalidateQueries({ queryKey: ['dashboard'] }),
       client.invalidateQueries({ queryKey: ['items'] }),
       client.invalidateQueries({ queryKey: ['tags'] }),
+      client.invalidateQueries({ queryKey: ['background-removals', itemId] }),
     ]);
   const upload = useMutation({
     mutationFn: async (selectedFiles: File[]) => {
@@ -322,6 +345,12 @@ function AttachmentPanel({
   const cover = useMutation({
     mutationFn: (attachmentId: string) =>
       api(`/items/${itemId}/cover/${attachmentId}`, { method: 'PATCH' }),
+  });
+  const removeBackground = useMutation({
+    mutationFn: (attachmentId: string) =>
+      api<BackgroundRemovalJobRecord>(`/attachments/${attachmentId}/remove-background`, {
+        method: 'POST',
+      }),
   });
   const accept = (list: FileList | null) => {
     if (list) setFiles((old) => [...old, ...Array.from(list)].slice(0, 20));
@@ -383,6 +412,34 @@ function AttachmentPanel({
       });
     }
   };
+  const requestBackgroundRemoval = async (file: AttachmentRecord) => {
+    setMessage(null);
+    try {
+      const job = await removeBackground.mutateAsync(file.id);
+      await backgroundJobs.refetch();
+      if (job.status === 'UNAVAILABLE') {
+        setMessage({ kind: 'error', text: job.errorMessage || '本地系统抠图当前不可用。' });
+      } else if (job.status === 'SUCCEEDED') {
+        await refresh();
+        setMessage({ kind: 'success', text: '已复用这张原图现有的无背景版本。' });
+      } else {
+        setMessage({ kind: 'success', text: '已开始在 Mac 本机处理；原图会保留。' });
+      }
+    } catch (reason) {
+      setMessage({
+        kind: 'error',
+        text: reason instanceof ApiError ? reason.message : '无法启动本地系统抠图',
+      });
+    }
+  };
+  const jobsBySource = new Map(
+    (backgroundJobs.data ?? []).map((job) => [job.sourceAttachmentId, job]),
+  );
+  const resultIds = new Set(
+    (backgroundJobs.data ?? []).flatMap((job) =>
+      job.resultAttachmentId ? [job.resultAttachmentId] : [],
+    ),
+  );
   return (
     <section className="panel attachment-panel">
       <div className="panel-heading">
@@ -479,75 +536,116 @@ function AttachmentPanel({
         <Loading label="正在读取附件…" />
       ) : items.length ? (
         <div className="attachments-grid">
-          {items.map((file) => (
-            <article
-              key={file.id}
-              className={file.id === coverAttachmentId ? 'is-cover' : undefined}
-            >
-              {file.mimeType.startsWith('image/') && file.mimeType !== 'image/svg+xml' ? (
-                <a
-                  className="attachment-preview"
-                  href={contentUrl(file.id)}
-                  target="_blank"
-                  rel="noreferrer"
+          {items.map((file) =>
+            (() => {
+              const backgroundJob = jobsBySource.get(file.id);
+              const processing =
+                backgroundJob && ['QUEUED', 'PROCESSING'].includes(backgroundJob.status);
+              return (
+                <article
+                  key={file.id}
+                  className={file.id === coverAttachmentId ? 'is-cover' : undefined}
                 >
-                  <img src={contentUrl(file.id)} alt={file.description || file.originalFilename} />
-                </a>
-              ) : (
-                <span className="file-glyph">
-                  {file.mimeType === 'application/pdf' ? (
-                    <FileText />
-                  ) : file.category === 'PHOTO' ? (
-                    <FileImage />
+                  {file.mimeType.startsWith('image/') && file.mimeType !== 'image/svg+xml' ? (
+                    <a
+                      className="attachment-preview"
+                      href={contentUrl(file.id)}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <img
+                        src={contentUrl(file.id)}
+                        alt={file.description || file.originalFilename}
+                      />
+                    </a>
                   ) : (
-                    <File />
+                    <span className="file-glyph">
+                      {file.mimeType === 'application/pdf' ? (
+                        <FileText />
+                      ) : file.category === 'PHOTO' ? (
+                        <FileImage />
+                      ) : (
+                        <File />
+                      )}
+                    </span>
                   )}
-                </span>
-              )}
-              <div className="file-info">
-                <strong title={file.originalFilename}>{file.originalFilename}</strong>
-                <p>
-                  {categoryLabels[file.category]} · {formatBytes(file.size)}
-                  {file.id === coverAttachmentId && <span className="cover-label">预览图</span>}
-                </p>
-                {file.description && <small>{file.description}</small>}
-              </div>
-              <div className="file-actions">
-                {file.mimeType.startsWith('image/') && file.mimeType !== 'image/svg+xml' && (
-                  <button
-                    className={`icon-button ${file.id === coverAttachmentId ? 'is-active' : ''}`}
-                    onClick={() => chooseCover(file)}
-                    disabled={file.id === coverAttachmentId || cover.isPending}
-                    aria-label={
-                      file.id === coverAttachmentId
-                        ? `${file.originalFilename} 是当前预览图`
-                        : `将 ${file.originalFilename} 设为预览图`
-                    }
-                    title={file.id === coverAttachmentId ? '当前预览图' : '设为预览图'}
-                  >
-                    <Star
-                      size={16}
-                      fill={file.id === coverAttachmentId ? 'currentColor' : 'none'}
-                    />
-                  </button>
-                )}
-                <a
-                  className="icon-button"
-                  href={contentUrl(file.id, true)}
-                  aria-label={`下载 ${file.originalFilename}`}
-                >
-                  <Download size={16} />
-                </a>
-                <button
-                  className="icon-button danger-text"
-                  onClick={() => remove(file)}
-                  aria-label={`删除 ${file.originalFilename}`}
-                >
-                  <Trash2 size={16} />
-                </button>
-              </div>
-            </article>
-          ))}
+                  <div className="file-info">
+                    <strong title={file.originalFilename}>{file.originalFilename}</strong>
+                    <p>
+                      {categoryLabels[file.category]} · {formatBytes(file.size)}
+                      {file.id === coverAttachmentId && <span className="cover-label">预览图</span>}
+                    </p>
+                    {file.description && <small>{file.description}</small>}
+                    {backgroundJob && (
+                      <small
+                        className={`background-job-status ${backgroundJob.status.toLowerCase()}`}
+                      >
+                        {processing
+                          ? '正在 Mac 本机移除背景…'
+                          : backgroundJob.status === 'SUCCEEDED'
+                            ? '无背景版本已生成'
+                            : backgroundJob.errorMessage || '本地抠图未完成'}
+                      </small>
+                    )}
+                  </div>
+                  <div className="file-actions">
+                    {file.mimeType.startsWith('image/') &&
+                      file.mimeType !== 'image/svg+xml' &&
+                      !resultIds.has(file.id) && (
+                        <button
+                          className="icon-button"
+                          onClick={() => void requestBackgroundRemoval(file)}
+                          disabled={Boolean(processing) || removeBackground.isPending}
+                          aria-label={`${backgroundJob && ['FAILED', 'UNAVAILABLE'].includes(backgroundJob.status) ? '重试' : ''}移除 ${file.originalFilename} 的背景`}
+                          title={
+                            processing
+                              ? '正在本机处理'
+                              : backgroundJob &&
+                                  ['FAILED', 'UNAVAILABLE'].includes(backgroundJob.status)
+                                ? '重试本地抠图'
+                                : '一键移除背景'
+                          }
+                        >
+                          <WandSparkles size={16} />
+                        </button>
+                      )}
+                    {file.mimeType.startsWith('image/') && file.mimeType !== 'image/svg+xml' && (
+                      <button
+                        className={`icon-button ${file.id === coverAttachmentId ? 'is-active' : ''}`}
+                        onClick={() => chooseCover(file)}
+                        disabled={file.id === coverAttachmentId || cover.isPending}
+                        aria-label={
+                          file.id === coverAttachmentId
+                            ? `${file.originalFilename} 是当前预览图`
+                            : `将 ${file.originalFilename} 设为预览图`
+                        }
+                        title={file.id === coverAttachmentId ? '当前预览图' : '设为预览图'}
+                      >
+                        <Star
+                          size={16}
+                          fill={file.id === coverAttachmentId ? 'currentColor' : 'none'}
+                        />
+                      </button>
+                    )}
+                    <a
+                      className="icon-button"
+                      href={contentUrl(file.id, true)}
+                      aria-label={`下载 ${file.originalFilename}`}
+                    >
+                      <Download size={16} />
+                    </a>
+                    <button
+                      className="icon-button danger-text"
+                      onClick={() => remove(file)}
+                      aria-label={`删除 ${file.originalFilename}`}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </article>
+              );
+            })(),
+          )}
         </div>
       ) : (
         <Empty title="还没有数字资料" detail="把照片、说明书、发票和保修资料留在物品身边。" />

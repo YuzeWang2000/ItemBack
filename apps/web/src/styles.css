@@ -1561,6 +1561,21 @@ button {
   background: #fff;
   object-fit: contain;
 }
+
+.background-job-status {
+  display: block;
+  margin-top: 0.35rem;
+  color: var(--ink-muted);
+}
+
+.background-job-status.succeeded {
+  color: var(--success, #27784a);
+}
+
+.background-job-status.failed,
+.background-job-status.unavailable {
+  color: var(--danger, #a43c32);
+}
 .file-glyph svg {
   width: 20px;
 }

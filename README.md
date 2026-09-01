@@ -12,7 +12,9 @@ ItemBack 是一个面向长期持有的个人物品档案系统。它用空间�
 - Decimal 金额、包含首日的自然日持有天数、分币种价值及日均成本统计
 - 全部物品卡片视图，支持状态与多标签组合筛选
 - 物品有效期、多标签创建/选择/编辑，以及按标签搜索
+- 品牌中文名或常用名与品牌英文名分别记录，并可按任一名称搜索
 - 多文件拖放/选择上传、Web 随手拍，图片预览，PDF/文档/压缩包下载，认证访问与安全存储名
+- macOS Apple Vision 本地一键抠图，异步串行处理、保留原图、透明 PNG 预览与失败重试
 - 移动历史、全字段物品编辑、归档、跨字段搜索与完整路径
 - 响应式登录、仪表盘、空间浏览、表单、详情和搜索页面
 - Swagger、数据库迁移、可重复 seed、结构化生产日志、健康检查
@@ -41,6 +43,76 @@ docker-compose.prod.yml 生产容器参考
 - pnpm 11（根目录已声明准确版本）
 - Docker Desktop / Docker Engine + Compose（常规本地开发）
 - 支持当前平台的 embedded-postgres 二进制（自动化测试使用；不替代开发或生产数据库）
+- 本地抠图需要 macOS 14 或更高版本和完整 Xcode 工具链
+
+## macOS 本地抠图
+
+物归的 API 使用 TypeScript/Node.js，不能直接调用 macOS 的 Apple Vision 框架。因此项目包含一个
+很小的 Swift 助手。下面的命令使用 Xcode 把 Swift 源码编译成 Mac 可执行文件：
+
+```bash
+bash scripts/build-vision-helper.sh
+```
+
+编译结果位于
+`native/background-removal-helper/.build/release/itemback-vision-helper`。构建命令只生成可执行文件，
+不会启动服务、不会处理照片，也不会上传任何数据。首次使用、本地清理了 `.build` 目录，或者修改了
+Swift 助手源码后需要重新构建；普通的 Web/API 代码修改不需要重新构建它。
+
+助手有两种运行方式：
+
+| 场景                | 助手状态                                                     | 是否随物归启动/停止                |
+| ------------------- | ------------------------------------------------------------ | ---------------------------------- |
+| `pnpm dev` 原生开发 | 每次收到抠图任务时，API 临时启动一个助手子进程；处理完即退出 | 是，不需要单独启动或停止           |
+| Docker 生产部署     | Mac 宿主机上独立运行的 loopback 常驻进程                     | 否，需要在另一个终端单独启动和停止 |
+
+之所以生产环境需要独立进程，是因为 NestJS API 位于 Linux Docker 容器中，容器本身不能加载
+macOS 的 Apple Vision 框架。
+
+### 本地开发的启动和停止
+
+首次使用先构建一次助手，之后启动方式与以前相同：
+
+```bash
+bash scripts/build-vision-helper.sh
+pnpm dev
+```
+
+按 `Ctrl+C` 停止 `pnpm dev` 即可。此模式没有需要额外关闭的常驻抠图进程。
+
+### Docker 生产部署的启动和停止
+
+先在 `.env.production` 中设置 `VISION_HELPER_TOKEN`。然后在 Mac 的第一个终端启动助手，环境变量
+`ITEMBACK_VISION_TOKEN` 必须使用相同的值：
+
+```bash
+export ITEMBACK_VISION_TOKEN='替换为至少32字符的随机密钥'
+bash scripts/run-vision-helper.sh
+```
+
+这个命令会占用当前终端并持续运行。保持该终端开启，再在第二个终端按原来的方式启动物归：
+
+```bash
+pnpm prod:init
+```
+
+日常停止时分开处理：
+
+```bash
+# 第二个终端：停止物归的 Docker 服务，数据不会被删除
+docker compose --env-file .env.production -f docker-compose.prod.yml down
+
+# 第一个终端：按 Ctrl+C 停止本地抠图助手
+```
+
+只停止 Docker 不会自动停止助手；只停止助手也不会停止物归，但此时点击抠图会显示功能不可用，
+其他功能不受影响。下次启动时无需重新构建，分别重新运行 `scripts/run-vision-helper.sh` 和原有的
+Docker 启动命令即可。
+
+生产配置使用 `VISION_HELPER_MODE=http`、
+`VISION_HELPER_URL=http://host.docker.internal:43118/remove-background`。助手只监听 `127.0.0.1`、
+使用共享密钥鉴权、只接收图片字节、不接受文件路径，也不会调用任何云服务。详细状态模型和安全边界见
+[本地系统抠图设计](docs/LOCAL_BACKGROUND_REMOVAL.md)。
 
 先确认 Docker Desktop / Docker Engine 已启动，并在终端中验证：
 
@@ -103,7 +175,17 @@ docker compose --env-file .env.production -f docker-compose.prod.yml ps
 docker compose --env-file .env.production -f docker-compose.prod.yml logs --tail=100
 ```
 
-默认 Web 地址为 <http://localhost:8080>。同一局域网设备使用 `http://<Mac或服务器的局域网IP>:8080`；macOS 可用 `ipconfig getifaddr en0` 查询常见主网络接口地址。
+生产 Web 默认绑定宿主机 80 端口，因此网址不再需要端口号。Mac 会通过 mDNS 自动发布
+`<LocalHostName>.local`：运行 `scutil --get LocalHostName` 可查看名称。本机当前名称若为
+`Adrian`，同一局域网设备可直接访问 <http://Adrian.local>。
+
+如果访问设备或路由器不支持 `.local`/mDNS，仍可使用 `http://<Mac的局域网IP>`，同样不需要
+`:8080`。若 80 端口已被其他程序占用，可在 `.env.production` 设置 `WEB_PORT=8080`，但此时网址
+需要重新带上 `:8080`。任意自定义域名（例如 `itemback.home`）还需要在路由器或局域网 DNS 中把该
+名称解析到 Mac，单独修改 Nginx 无法创建 DNS 记录。
+
+Web 反向代理允许最大 100 MB 的 multipart 请求，API 仍按 `MAX_FILE_SIZE_MB`（默认单文件 25 MB）
+校验每个附件，手机拍摄的常见数 MB 图片不会再被 Nginx 提前以 413 拒绝。
 
 不要在生产命令后添加 `-v`，不要删除 `ITEMBACK_DATA_DIR` 指向的目录。虽然 bind mount 数据不随容器消失，但仍需定期执行成对备份。
 

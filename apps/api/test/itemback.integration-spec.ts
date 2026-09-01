@@ -13,6 +13,9 @@ describe('ItemBack API critical flow (real PostgreSQL)', () => {
   let agent: ReturnType<typeof request.agent>;
 
   beforeAll(async () => {
+    process.env.VISION_HELPER_MODE = 'http';
+    delete process.env.VISION_HELPER_URL;
+    delete process.env.VISION_HELPER_TOKEN;
     prisma = new PrismaClient();
     await prisma.attachment.deleteMany();
     await prisma.movement.deleteMany();
@@ -82,6 +85,8 @@ describe('ItemBack API critical flow (real PostgreSQL)', () => {
           isContainer: true,
           valueAmount: '600.00',
           currency: 'CNY',
+          brand: '耐克',
+          brandEnglishName: 'Nike',
           acquiredDate: acquired.toISOString().slice(0, 10),
           expiryDate: expiry.toISOString().slice(0, 10),
           tags: ['通勤', '日常'],
@@ -92,6 +97,7 @@ describe('ItemBack API critical flow (real PostgreSQL)', () => {
     expect(bag.dailyCost).toBe('10.0000');
     expect(bag.expiryDate).toBe(expiry.toISOString().slice(0, 10));
     expect(bag.tags.map((tag: { name: string }) => tag.name)).toEqual(['日常', '通勤']);
+    expect(bag).toMatchObject({ brand: '耐克', brandEnglishName: 'Nike' });
 
     const book = (
       await agent
@@ -179,6 +185,18 @@ describe('ItemBack API critical flow (real PostgreSQL)', () => {
     expect(uploaded[0]).not.toHaveProperty('storageKey');
     expect(uploaded[1].originalFilename).toBe('unsafe.html');
     expect(uploaded[2].originalFilename).toBe('物品照片.png');
+    const unavailableJob = (
+      await agent.post(`/api/v1/attachments/${uploaded[2].id}/remove-background`).expect(201)
+    ).body;
+    expect(unavailableJob).toMatchObject({
+      sourceAttachmentId: uploaded[2].id,
+      status: 'UNAVAILABLE',
+      errorCode: 'BACKGROUND_REMOVAL_UNAVAILABLE',
+      resultAttachmentId: null,
+    });
+    expect(
+      (await agent.get(`/api/v1/items/${book.id}/background-removals`).expect(200)).body,
+    ).toContainEqual(expect.objectContaining({ id: unavailableJob.id }));
     await agent
       .get(`/api/v1/attachments/${uploaded[1].id}/content`)
       .expect(200)
@@ -236,6 +254,9 @@ describe('ItemBack API critical flow (real PostgreSQL)', () => {
     expect(search.items[0].path.map((part: { name: string }) => part.name)).toEqual(['公司', '书']);
     const tagSearch = (await agent.get('/api/v1/search').query({ q: '办公' }).expect(200)).body;
     expect(tagSearch.items.map((item: { id: string }) => item.id)).toContain(book.id);
+    const englishBrandSearch = (await agent.get('/api/v1/search').query({ q: 'nike' }).expect(200))
+      .body;
+    expect(englishBrandSearch.items.map((item: { id: string }) => item.id)).toContain(bag.id);
     const dashboard = (await agent.get('/api/v1/dashboard').expect(200)).body;
     expect(dashboard).toMatchObject({ itemCount: 3, spaceCount: 2 });
     expect(dashboard.valueTotals).toContainEqual({ currency: 'CNY', amount: '600.00' });

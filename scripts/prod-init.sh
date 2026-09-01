@@ -29,5 +29,13 @@ docker exec "$postgres_container" sh -c 'pg_isready -U "$POSTGRES_USER" -d postg
 docker exec "$postgres_container" sh -c \
   'psql -U "$POSTGRES_USER" -d postgres -Atc "SELECT 1 FROM pg_database WHERE datname = '\''$POSTGRES_DB'\''" | grep -q 1 || createdb -U "$POSTGRES_USER" "$POSTGRES_DB"'
 docker compose --env-file "$env_file" -f "$compose_file" up -d --build api web
+web_port="$(sed -n 's/^WEB_PORT=//p' "$env_file" | tail -n 1)"
+web_port="${web_port:-80}"
+if command -v scutil >/dev/null 2>&1; then
+  local_host="$(scutil --get LocalHostName 2>/dev/null || hostname)"
+  [[ "$web_port" = "80" ]] && access_url="http://${local_host}.local" || access_url="http://${local_host}.local:${web_port}"
+else
+  [[ "$web_port" = "80" ]] && access_url="http://localhost" || access_url="http://localhost:${web_port}"
+fi
 echo "初始化完成。数据目录: $data_dir"
-echo "访问地址: http://localhost:8080"
+echo "访问地址: $access_url"

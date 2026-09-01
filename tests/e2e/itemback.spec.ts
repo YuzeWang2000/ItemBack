@@ -34,9 +34,12 @@ test('核心用户流：登录、创建、嵌套、成本、附件、移动与�
   await page.getByLabel('入手日期').fill(acquired.toISOString().slice(0, 10));
   await page.getByLabel('记录价值').fill('600');
   await page.getByLabel('币种').fill('CNY');
+  await page.getByLabel('品牌中文名或常用名（可选）').fill('耐克');
+  await page.getByLabel('品牌英文名（可选）').fill('Nike');
   await page.getByRole('button', { name: '加入档案' }).click();
   await expect(page.getByRole('heading', { name: bagName })).toBeVisible();
   await expect(page.getByText(/10\.0000.*天/)).toBeVisible();
+  await expect(page.getByText('Nike', { exact: true })).toBeVisible();
 
   await page.getByRole('link', { name: /放入物品/ }).click();
   await page.getByLabel('物品名称').fill(bookName);
@@ -62,6 +65,11 @@ test('核心用户流：登录、创建、嵌套、成本、附件、移动与�
     'background-color',
     'rgb(255, 255, 255)',
   );
+  await page.getByRole('button', { name: '移除 camera-photo.png 的背景' }).click();
+  await expect(page.getByText('当前部署未配置 macOS 本地系统抠图助手').first()).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: '重试移除 camera-photo.png 的背景' }),
+  ).toBeVisible();
 
   await page.locator('.drop-zone input[type=file]').setInputFiles([
     { name: 'book-front.png', mimeType: 'image/png', buffer: png },

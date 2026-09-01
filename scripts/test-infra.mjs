@@ -32,6 +32,7 @@ export async function startTestDatabase(label) {
       ADMIN_EMAIL: 'admin@itemback.test',
       ADMIN_PASSWORD: 'itemback-test-password',
       SESSION_DAYS: '1',
+      COOKIE_SECURE: 'false',
     },
   };
 }

@@ -7,6 +7,9 @@ env.STORAGE_DIR = path.join(workspace, '.test-data', 'e2e-storage');
 env.PORT = '3000';
 env.WEB_ORIGIN = 'http://127.0.0.1:5173';
 env.VITE_API_URL = 'http://127.0.0.1:3000/api/v1';
+env.VISION_HELPER_MODE = 'http';
+env.VISION_HELPER_URL = '';
+env.VISION_HELPER_TOKEN = '';
 let apiProcess;
 let webProcess;
 try {

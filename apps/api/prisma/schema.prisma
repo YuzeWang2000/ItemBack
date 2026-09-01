@@ -30,6 +30,14 @@ enum AttachmentCategory {
   OTHER
 }
 
+enum BackgroundRemovalStatus {
+  QUEUED
+  PROCESSING
+  SUCCEEDED
+  FAILED
+  UNAVAILABLE
+}
+
 model User {
   id           String        @id @default(uuid()) @db.Uuid
   email        String        @unique
@@ -52,34 +60,36 @@ model AuthSession {
 }
 
 model Node {
-  id                String       @id @default(uuid()) @db.Uuid
-  nodeType          NodeType
-  parentId          String?      @db.Uuid
-  coverAttachmentId String?      @db.Uuid
-  name              String       @db.VarChar(200)
-  description       String?      @db.Text
-  isContainer       Boolean      @default(false)
-  status            ItemStatus   @default(ACTIVE)
-  acquiredDate      DateTime?    @db.Date
-  endDate           DateTime?    @db.Date
-  expiryDate        DateTime?    @db.Date
-  valueAmount       Decimal?     @db.Decimal(19, 4)
-  currency          String?      @db.VarChar(3)
-  quantity          Int          @default(1)
-  brand             String?      @db.VarChar(200)
-  model             String?      @db.VarChar(200)
-  serialNumber      String?      @db.VarChar(300)
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
-  archivedAt        DateTime?
-  parent            Node?        @relation("NodeTree", fields: [parentId], references: [id], onDelete: Restrict)
-  children          Node[]       @relation("NodeTree")
-  attachments       Attachment[] @relation("ItemAttachments")
-  coverAttachment   Attachment?  @relation("NodeCoverAttachment", fields: [coverAttachmentId], references: [id], onDelete: SetNull)
-  tags              NodeTag[]
-  movements         Movement[]   @relation("MovementItem")
-  movedFromHere     Movement[]   @relation("MovementFrom")
-  movedToHere       Movement[]   @relation("MovementTo")
+  id                    String                 @id @default(uuid()) @db.Uuid
+  nodeType              NodeType
+  parentId              String?                @db.Uuid
+  coverAttachmentId     String?                @db.Uuid
+  name                  String                 @db.VarChar(200)
+  description           String?                @db.Text
+  isContainer           Boolean                @default(false)
+  status                ItemStatus             @default(ACTIVE)
+  acquiredDate          DateTime?              @db.Date
+  endDate               DateTime?              @db.Date
+  expiryDate            DateTime?              @db.Date
+  valueAmount           Decimal?               @db.Decimal(19, 4)
+  currency              String?                @db.VarChar(3)
+  quantity              Int                    @default(1)
+  brand                 String?                @db.VarChar(200)
+  brandEnglishName      String?                @db.VarChar(200)
+  model                 String?                @db.VarChar(200)
+  serialNumber          String?                @db.VarChar(300)
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  archivedAt            DateTime?
+  parent                Node?                  @relation("NodeTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children              Node[]                 @relation("NodeTree")
+  attachments           Attachment[]           @relation("ItemAttachments")
+  coverAttachment       Attachment?            @relation("NodeCoverAttachment", fields: [coverAttachmentId], references: [id], onDelete: SetNull)
+  tags                  NodeTag[]
+  movements             Movement[]             @relation("MovementItem")
+  backgroundRemovalJobs BackgroundRemovalJob[]
+  movedFromHere         Movement[]             @relation("MovementFrom")
+  movedToHere           Movement[]             @relation("MovementTo")
 
   @@index([parentId])
   @@index([nodeType, archivedAt])
@@ -124,19 +134,46 @@ model Movement {
 }
 
 model Attachment {
-  id               String             @id @default(uuid()) @db.Uuid
-  itemId           String             @db.Uuid
-  category         AttachmentCategory @default(OTHER)
-  originalFilename String             @db.VarChar(500)
-  mimeType         String             @db.VarChar(200)
-  size             Int
-  storageKey       String             @unique @db.VarChar(200)
-  checksum         String             @db.VarChar(64)
-  description      String?            @db.VarChar(1000)
-  sortOrder        Int                @default(0)
-  createdAt        DateTime           @default(now())
-  item             Node               @relation("ItemAttachments", fields: [itemId], references: [id], onDelete: Cascade)
-  coverFor         Node[]             @relation("NodeCoverAttachment")
+  id                       String                 @id @default(uuid()) @db.Uuid
+  itemId                   String                 @db.Uuid
+  category                 AttachmentCategory     @default(OTHER)
+  originalFilename         String                 @db.VarChar(500)
+  mimeType                 String                 @db.VarChar(200)
+  size                     Int
+  storageKey               String                 @unique @db.VarChar(200)
+  checksum                 String                 @db.VarChar(64)
+  description              String?                @db.VarChar(1000)
+  sortOrder                Int                    @default(0)
+  createdAt                DateTime               @default(now())
+  item                     Node                   @relation("ItemAttachments", fields: [itemId], references: [id], onDelete: Cascade)
+  coverFor                 Node[]                 @relation("NodeCoverAttachment")
+  backgroundRemovalSources BackgroundRemovalJob[] @relation("BackgroundRemovalSource")
+  backgroundRemovalResult  BackgroundRemovalJob?  @relation("BackgroundRemovalResult")
 
   @@index([itemId, sortOrder, createdAt])
+}
+
+model BackgroundRemovalJob {
+  id                 String                  @id @default(uuid()) @db.Uuid
+  itemId             String                  @db.Uuid
+  sourceAttachmentId String                  @db.Uuid
+  sourceChecksum     String                  @db.VarChar(64)
+  resultAttachmentId String?                 @unique @db.Uuid
+  algorithmVersion   String                  @db.VarChar(100)
+  status             BackgroundRemovalStatus @default(QUEUED)
+  errorCode          String?                 @db.VarChar(100)
+  errorMessage       String?                 @db.VarChar(500)
+  attemptCount       Int                     @default(0)
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+  startedAt          DateTime?
+  completedAt        DateTime?
+  item               Node                    @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  sourceAttachment   Attachment              @relation("BackgroundRemovalSource", fields: [sourceAttachmentId], references: [id], onDelete: Cascade)
+  resultAttachment   Attachment?             @relation("BackgroundRemovalResult", fields: [resultAttachmentId], references: [id], onDelete: SetNull)
+
+  @@unique([sourceAttachmentId, algorithmVersion])
+  @@index([sourceChecksum, algorithmVersion])
+  @@index([itemId, createdAt(sort: Desc)])
+  @@index([status, createdAt])
 }
